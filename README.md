@@ -12,21 +12,19 @@ of this guide). If a demo does not match, the deployed build is out of date.
 
 ## How the tool behaves
 
-1. **Every question hides its answer.** Click **💡 Reveal** to show the working.
-   Backpropagation questions reveal one chain-rule factor per click, from the loss
-   backwards, and Figure A fills in as you go.
-2. **Next stays locked until the current answer is revealed**, because every question
-   uses the previous answer.
-3. **The network figure never runs ahead of the class.** z, a, ŷ, the loss and every
-   gradient stay as **?** until their question has been revealed.
-4. **Keys:** <kbd>R</kbd> reveal, <kbd>→</kbd> next, <kbd>←</kbd> previous.
-5. **Rounding.** Values are computed at full precision and shown to 4 decimals. Updated
+1. **Each question shows its full working.** Click **Next →** to move to the next
+   question and **← Prev** to go back. Backpropagation questions list every chain-rule
+   factor, and Figure A draws the path from the loss back to the weight.
+2. **The network figure never runs ahead of the class.** z, a, ŷ, the loss and every
+   gradient stay as **?** until you reach the question that computes them.
+3. **Keys:** <kbd>→</kbd> next, <kbd>←</kbd> previous.
+4. **Rounding.** Values are computed at full precision and shown to 4 decimals. Updated
    weights are rounded to 4 decimals, as students would round by hand, so every
    iteration can be checked with a calculator.
-6. **Any values work.** Change the inputs, target, learning rate or any weight and click
+5. **Any values work.** Change the inputs, target, learning rate or any weight and click
    **▶ Start**; all 14 questions are rebuilt with the new numbers. **↺ Reset** restores
    the defaults.
-7. **Deep links** open a given question with its earlier answers revealed, e.g.
+6. **Deep links** open the simulator at a given question, e.g.
    `?step=8`, `?preset=dead&step=10`, `?part=2&opt=adam&step=3`.
 
 One iteration is 14 questions in four colour-coded phases:
@@ -68,7 +66,7 @@ x₂ = 0.9, y = 0.5, lr = 0.1, W₁₃ = 0.1, W₂₃ = 0.8, W₁₄ = 0.4, W₂
 
 Question 14 then shows **ŷ 0.8385 → 0.7154** and **Loss 0.1146 → 0.0464** after one update.
 
-**The question to ask at Question 8:** *"Before I reveal anything: which factor of
+**Ask before moving on to Question 8:** *"Which factor of
 ∂Loss/∂W₂₄ have we already computed?"* The answer is ①, ∂Loss/∂ŷ. That reuse is the
 whole efficiency argument for backpropagation.
 
@@ -90,7 +88,7 @@ gradients:  W₂₄ −0.5856   W₃₅ −0.5459   W₄₅ −0.4916
 Every gradient is now **negative**, so every weight goes **up**, and ŷ moves from
 0.8385 to 0.978, toward 1.2. Loss after one update: 0.0493.
 
-**Ask before revealing Question 5:** *"The forward pass is identical to Demo 1. Which
+**Ask before moving on to Question 5:** *"The forward pass is identical to Demo 1. Which
 number in the backward pass changes sign, and why does that flip all six?"*
 ∂Loss/∂ŷ = 2(ŷ − y) is the first factor of every product.
 
@@ -190,7 +188,7 @@ the dropdown:
 
 Figure 4 adds each optimizer as you finish it.
 
-**Ask before revealing Momentum's W_new:** *"The gradient is negative. Which way will W
+**Ask before moving on to Momentum's W_new question:** *"The gradient is negative. Which way will W
 move?"* Most students say up. It moves down, because the old velocity (+0.2) still
 outweighs the new gradient contribution (−0.04).
 
