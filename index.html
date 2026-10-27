@@ -1,0 +1,1556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ANN Simulator &mdash; Forward Pass, Loss, Backpropagation, Weight Update</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #E8ECF2;
+    --surface:   #FFFFFF;
+    --surface2:  #EDF1F7;
+    --border:    #B8C8D8;
+    --border2:   #8AA0B8;
+    --text:      #0E1C2A;
+    --muted:     #3A5068;
+    --dim:       #6A8098;
+    --slate:     #1E2E3E;
+    --radius:    10px;
+
+    /* one colour family per training phase */
+    --fwd:  #4A1E7A;  --fwd-bg:  #EDE3F8;  --fwd-bd:  #8A6AC0;
+    --loss: #6A3A00;  --loss-bg: #FFF0C0;  --loss-bd: #C8900A;
+    --bwd:  #7A0A0A;  --bwd-bg:  #F8DCDC;  --bwd-bd:  #C04040;
+    --upd:  #0F4A28;  --upd-bg:  #D4F0E0;  --upd-bd:  #3A9A68;
+    --opt:  #005A82;  --opt-bg:  #CCE8F8;  --opt-bd:  #5AAAD0;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 19px;
+    line-height: 1.65;
+    min-height: 100vh;
+  }
+  code, .mono { font-family: Consolas, 'Courier New', monospace; }
+
+  /* ── Header: centred badge ─────────────────────────────────────────── */
+  header { background: var(--slate); padding: 26px 16px 20px; text-align: center; }
+  .hdr-badge {
+    display: inline-block; max-width: 100%;
+    background: rgba(255,255,255,0.08); border: 2px solid rgba(255,255,255,0.30);
+    border-radius: 22px; padding: 16px 52px 18px;
+  }
+  .hdr-title { font-size: 48px; font-weight: 900; color: #FFF; letter-spacing: 1px; line-height: 1.15; }
+  .hdr-title span { color: #50C0F0; }
+  .hdr-name  { font-size: 25px; font-weight: 800; color: #DDEEF8; margin-top: 8px; }
+  .hdr-dept  { font-size: 19px; font-weight: 600; color: #A8C8DC; }
+  .hdr-sub   { margin-top: 14px; font-size: 16px; font-weight: 600; color: #88AABF; }
+  @media (max-width: 640px) {
+    .hdr-badge { padding: 12px 18px 14px; }
+    .hdr-title { font-size: 34px; }
+    .hdr-name  { font-size: 19px; }
+    .hdr-dept  { font-size: 15px; }
+  }
+
+  /* ── Tabs ──────────────────────────────────────────────────────────── */
+  .tabs {
+    max-width: 1240px; margin: 20px auto 0; padding: 0 24px;
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  }
+  .tab {
+    padding: 10px 20px; border-radius: var(--radius); border: 2px solid var(--border);
+    background: var(--surface); color: var(--muted); font-size: 17px; font-weight: 800;
+    cursor: pointer;
+  }
+  .tab.active { background: var(--slate); border-color: var(--slate); color: #FFF; }
+
+  .main {
+    max-width: 1240px; margin: 0 auto;
+    padding: 18px 24px 52px;
+    display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 22px;
+  }
+  .main[hidden] { display: none; }
+  @media (max-width: 980px) { .main { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 640px) { .main, .tabs { padding-left: 16px; padding-right: 16px; } }
+  .left, .right { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 22px 26px;
+  }
+  @media (max-width: 640px) { .card { padding: 16px; } }
+  .card-title {
+    font-size: 14px; font-weight: 800; color: var(--dim);
+    letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 14px;
+  }
+  .fig-caption { font-size: 14px; font-weight: 600; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+
+  /* ── Inputs ────────────────────────────────────────────────────────── */
+  .input-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .input-group {
+    display: flex; align-items: center;
+    background: var(--surface2); border: 2px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .input-prefix {
+    padding: 6px 10px; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 17px; font-weight: 800; color: #005A82;
+    border-right: 2px solid var(--border); white-space: nowrap;
+  }
+  .input-group input, .input-group select {
+    background: transparent; border: none; outline: none;
+    color: var(--text); font-family: Consolas, 'Courier New', monospace;
+    font-size: 18px; font-weight: 800; width: 86px; padding: 6px 8px;
+  }
+  .input-group select { width: auto; font-family: inherit; font-size: 17px; cursor: pointer; }
+  .input-row-label { width: 100%; font-size: 13px; font-weight: 800; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+
+  .controls-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+  .quick-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .quick-label { font-size: 15px; font-weight: 700; color: var(--muted); }
+  .quick-pill {
+    padding: 4px 14px; border-radius: 20px; border: 2px solid var(--opt-bd);
+    background: var(--opt-bg); color: #003F5C; font-size: 15px; font-weight: 800; cursor: pointer;
+  }
+  .quick-pill:hover { background: #B4DCF4; }
+  .help-text { margin-top: 12px; font-size: 15px; font-weight: 600; color: var(--muted); line-height: 1.7; }
+  .err-text { margin-top: 10px; font-size: 15px; font-weight: 800; color: var(--bwd); }
+
+  /* ── Buttons ───────────────────────────────────────────────────────── */
+  .btn {
+    padding: 10px 20px; border-radius: var(--radius); border: none;
+    font-size: 17px; font-weight: 800; cursor: pointer; color: #FFF;
+    transition: opacity 0.15s, transform 0.1s; white-space: nowrap;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+  .btn-start  { background: #1A3A56; }
+  .btn-train  { background: #0F5432; }
+  .btn-reset  { background: #6A3A00; }
+  .btn-prev   { background: #3A4E62; }
+  .btn-next   { background: #005A82; }
+  .btn-reveal { background: #7A0A0A; }
+  .btn-all    { background: #FFF; color: #7A0A0A; border: 2px solid #C04040; }
+  .btn:hover:not(:disabled) { opacity: 0.88; }
+
+  /* ── Question / step card ──────────────────────────────────────────── */
+  .step-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px 26px; }
+  @media (max-width: 640px) { .step-card { padding: 16px; } }
+  .step-header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .step-badge {
+    padding: 4px 14px; border-radius: 20px; font-size: 14px; font-weight: 900; letter-spacing: 0.8px;
+    border: 2px solid; white-space: nowrap;
+  }
+  .ph-fwd  { color: var(--fwd);  background: var(--fwd-bg);  border-color: var(--fwd-bd); }
+  .ph-loss { color: var(--loss); background: var(--loss-bg); border-color: var(--loss-bd); }
+  .ph-bwd  { color: var(--bwd);  background: var(--bwd-bg);  border-color: var(--bwd-bd); }
+  .ph-upd  { color: var(--upd);  background: var(--upd-bg);  border-color: var(--upd-bd); }
+  .ph-opt  { color: var(--opt);  background: var(--opt-bg);  border-color: var(--opt-bd); }
+  .step-counter { font-size: 15px; font-weight: 700; color: var(--dim); }
+  .step-title { font-size: 23px; font-weight: 800; color: var(--slate); line-height: 1.3; margin-bottom: 8px; }
+  .step-q { font-size: 18px; color: var(--text); }
+  .step-q ol, .step-q ul { margin: 6px 0 0 26px; }
+  .formula {
+    display: inline-block; margin: 8px 0; padding: 6px 14px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    font-size: 18px; font-weight: 700;
+  }
+  .side-note {
+    margin-top: 12px; padding: 10px 14px; border-radius: 8px;
+    background: #FFF8E0; border: 1px solid var(--loss-bd); border-left: 5px solid var(--loss-bd);
+    font-size: 16px; line-height: 1.6;
+  }
+  .side-note b.sn { color: var(--loss); text-transform: uppercase; letter-spacing: 0.8px; font-size: 13px; }
+  details.calculus {
+    margin-top: 12px; padding: 10px 14px; border-radius: 8px;
+    background: #F4F0FA; border: 1px solid var(--fwd-bd); font-size: 16px; line-height: 1.6;
+  }
+  details.calculus summary { cursor: pointer; font-weight: 800; color: var(--fwd); }
+  details.calculus ol { margin: 6px 0 0 22px; }
+  .step-fig { margin-top: 14px; overflow-x: auto; }
+  .step-fig svg { width: 100%; min-width: 620px; height: auto; display: block; }
+  .answer { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .answer:empty { display: none; }
+  .ans-part {
+    border: 2px dashed var(--border); border-radius: 10px; padding: 10px 14px;
+    background: #FAFCFE; font-size: 17px;
+  }
+  .ans-part.new { animation: pop 0.25s ease-out; }
+  .ans-part p + p { margin-top: 6px; }
+  .ans-part p:first-child + pre, .ans-part pre + p { margin-top: 8px; }
+  @keyframes pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  pre.calc {
+    font-family: Consolas, 'Courier New', monospace; font-size: 17px; line-height: 1.6;
+    background: #F4F7FB; border-left: 4px solid var(--border2); border-radius: 6px;
+    padding: 8px 12px; overflow-x: auto; white-space: pre;
+  }
+  .result {
+    font-size: 19px; font-weight: 800;
+    background: var(--bwd-bg); border: 2px solid var(--bwd-bd); border-radius: 8px;
+    padding: 8px 12px;
+  }
+  .muted { color: var(--dim); font-weight: 600; }
+  .up   { color: #005A82; font-weight: 800; }
+  .down { color: var(--bwd); font-weight: 800; }
+  .ok   { color: var(--upd); font-weight: 800; }
+  .bad  { color: var(--bwd); font-weight: 800; }
+
+  .reveal-row, .nav-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  .nav-hint { font-size: 14px; font-weight: 600; color: var(--dim); }
+  .progress-track { display: flex; gap: 5px; margin-top: 16px; }
+  .prog-step { flex: 1; height: 9px; border-radius: 5px; background: var(--surface2); border: 1px solid var(--border); }
+  .prog-step.done.fwd,  .prog-step.active.fwd  { background: var(--fwd-bd);  border-color: var(--fwd-bd); }
+  .prog-step.done.loss, .prog-step.active.loss { background: var(--loss-bd); border-color: var(--loss-bd); }
+  .prog-step.done.bwd,  .prog-step.active.bwd  { background: var(--bwd-bd);  border-color: var(--bwd-bd); }
+  .prog-step.done.upd,  .prog-step.active.upd  { background: var(--upd-bd);  border-color: var(--upd-bd); }
+  .prog-step.done.opt,  .prog-step.active.opt  { background: var(--opt-bd);  border-color: var(--opt-bd); }
+  .prog-step.done { opacity: 0.45; }
+  .prog-step.active { opacity: 1; height: 13px; margin-top: -2px; }
+  .phase-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--muted); }
+  .phase-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  /* ── Network figure ────────────────────────────────────────────────── */
+  #net-svg { width: 100%; height: auto; display: block; }
+  .flow { stroke-dasharray: 10 8; animation: flow 0.9s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -18; } }
+  @media (prefers-reduced-motion: reduce) { .flow { animation: none; } }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 14px; font-weight: 700; color: var(--muted); }
+  .leg-line { display: inline-block; width: 26px; height: 0; border-top: 4px solid; vertical-align: middle; margin-right: 6px; }
+
+  table.wt { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 16px; }
+  table.wt th { text-align: left; font-size: 13px; font-weight: 800; color: var(--dim); letter-spacing: 0.8px; text-transform: uppercase; padding: 6px 8px; border-bottom: 2px solid var(--border); }
+  table.wt td:first-child { font-family: inherit; }
+  table.wt td { padding: 6px 8px; border-bottom: 1px solid var(--surface2); font-family: Consolas, 'Courier New', monospace; font-weight: 700; }
+  table.wt td.q { color: var(--border2); }
+  .table-wrap { overflow-x: auto; }
+
+  /* ── Right column ──────────────────────────────────────────────────── */
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; }
+  .stat-label { font-size: 12px; font-weight: 800; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; }
+  .stat-val { font-family: Consolas, 'Courier New', monospace; font-size: 24px; font-weight: 800; color: var(--slate); }
+  .insight-card { background: #FFF8E0; border: 2px solid var(--loss-bd); border-radius: 14px; padding: 16px 20px; }
+  .insight-lbl { font-size: 13px; font-weight: 900; color: var(--loss); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+  .insight-txt { font-size: 16px; line-height: 1.65; }
+  .chart svg { width: 100%; height: auto; display: block; }
+  .bars { display: flex; flex-direction: column; gap: 6px; }
+  .bar-row { display: grid; grid-template-columns: 44px 1fr 74px; align-items: center; gap: 8px; font-size: 15px; font-weight: 800; }
+  .bar-row .bw { font-family: inherit; }
+  .bar-track { height: 16px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; }
+  .bar-val { font-family: Consolas, 'Courier New', monospace; text-align: right; }
+  .log-inner { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .log-entry { font-family: Consolas, 'Courier New', monospace; font-size: 14px; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: var(--surface2); }
+  .log-entry.good { background: var(--upd-bg); color: var(--upd); }
+  .log-entry.bad  { background: var(--bwd-bg); color: var(--bwd); }
+  .small-text { font-size: 15px; font-weight: 600; color: var(--muted); line-height: 1.75; }
+
+  .banner {
+    background: var(--opt-bg); border: 2px solid var(--opt-bd); border-radius: 14px;
+    padding: 14px 20px; font-size: 17px; line-height: 1.6;
+  }
+  .banner.warn { background: #FFF0C0; border-color: var(--loss-bd); }
+  .banner p + p, .problem p + p { margin-top: 8px; }
+  .problem { font-size: 17px; line-height: 1.65; }
+  .ph-chip { display: inline-block; padding: 0 10px; margin: 2px 0; border-radius: 14px; border-width: 2px; border-style: solid; font-size: 14px; font-weight: 800; white-space: nowrap; }
+  .opt-sheet { display: flex; flex-direction: column; gap: 8px; }
+  .opt-rule { border: 2px solid var(--surface2); border-radius: 8px; padding: 6px 10px; font-size: 14px; }
+  .opt-rule b { font-size: 15px; }
+  .opt-rule code { display: block; font-size: 14px; font-weight: 700; color: var(--slate); white-space: pre-wrap; }
+  .opt-rule.sel { border-color: var(--opt-bd); background: var(--opt-bg); }
+  .opt-legend { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 14px; font-weight: 700; }
+  .opt-legend span i { display: inline-block; width: 18px; height: 4px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+  .kbd { display: inline-block; padding: 0 6px; border: 1px solid var(--border2); border-radius: 4px; font-family: Consolas, monospace; font-size: 13px; background: #FFF; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hdr-badge">
+    <div class="hdr-title"><span>ANN</span> Simulator</div>
+    <div class="hdr-name">Instructors</div>
+    <div class="hdr-dept">Muhammad Rauf Butt (FCCU) and Muhammad Arif Butt (PU)</div>
+  </div>
+  <div class="hdr-sub">Forward Pass &rarr; Loss &rarr; Backpropagation &rarr; Weight Update &nbsp;&middot;&nbsp; a 2-2-1 feed-forward network, one step at a time</div>
+</header>
+
+<div class="tabs">
+  <button class="tab active" id="tab-1" onclick="showPart(1)">Part 1 &middot; Standard Gradient Descent</button>
+  <button class="tab" id="tab-2" onclick="showPart(2)">Part 2 &middot; Optimizers (after Part 1)</button>
+</div>
+
+<!-- ═════════════════════════ PART 1 ═════════════════════════ -->
+<div class="main" id="part-1">
+  <div class="left">
+
+    <div class="card">
+      <div class="card-title">The problem</div>
+      <div class="problem">
+        <p>A small feed-forward neural network has <b>two inputs</b> (x₁, x₂), <b>two hidden neurons</b>
+        (H₃, H₄) with <b>ReLU</b> activation, and <b>one output neuron</b> (O₅) with <b>no activation</b>,
+        because this is regression. There are no bias terms. The network is trained on a single sample
+        (x₁, x₂) whose true value is <b>y</b>, using the squared-error loss <b>Loss = (ŷ − y)²</b> and
+        gradient descent with learning rate <b>lr</b>.</p>
+        <p><b>How to read the weight names:</b> Wᵢₖ is the weight on the arrow going <i>from</i> neuron i
+        <i>to</i> neuron k. The inputs are neurons 1 and 2, the hidden neurons are 3 and 4, and the output is
+        neuron 5. So W₂₄ is "input 2 → hidden 4", and W₄₅ is "hidden 4 → output".</p>
+        <p>The 14 questions below take the network through <b>one complete training iteration</b>:
+        <span class="ph-chip ph-fwd">1&ndash;3 Forward pass</span>
+        <span class="ph-chip ph-loss">4 Loss</span>
+        <span class="ph-chip ph-bwd">5&ndash;12 Backpropagation</span>
+        <span class="ph-chip ph-upd">13&ndash;14 Weight update</span>.
+        Work each one out yourself, then click <b>Reveal</b> to check. Change any value below and click
+        <b>Start</b> to work the same questions with your own numbers.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Configure the network &amp; training sample</div>
+      <div class="input-grid">
+        <div class="input-row-label">Input sample, target and learning rate</div>
+        <div class="input-group"><span class="input-prefix">x₁</span><input type="number" step="any" id="in-x1"></div>
+        <div class="input-group"><span class="input-prefix">x₂</span><input type="number" step="any" id="in-x2"></div>
+        <div class="input-group"><span class="input-prefix">target y</span><input type="number" step="any" id="in-y"></div>
+        <div class="input-group"><span class="input-prefix">lr</span><input type="number" step="any" id="in-lr"></div>
+        <div class="input-row-label">Initial weights (no biases)</div>
+        <div class="input-group"><span class="input-prefix">W₁₃</span><input type="number" step="any" id="in-13"></div>
+        <div class="input-group"><span class="input-prefix">W₂₃</span><input type="number" step="any" id="in-23"></div>
+        <div class="input-group"><span class="input-prefix">W₁₄</span><input type="number" step="any" id="in-14"></div>
+        <div class="input-group"><span class="input-prefix">W₂₄</span><input type="number" step="any" id="in-24"></div>
+        <div class="input-group"><span class="input-prefix">W₃₅</span><input type="number" step="any" id="in-35"></div>
+        <div class="input-group"><span class="input-prefix">W₄₅</span><input type="number" step="any" id="in-45"></div>
+      </div>
+      <div class="controls-row">
+        <button class="btn btn-start" onclick="startP1()">&#9654; Start</button>
+        <button class="btn btn-train" onclick="trainP1(10)" title="Run 10 full epochs/iterations without stopping for the questions">&#9193; Train 10 epochs/iterations</button>
+        <button class="btn btn-reset" onclick="applyPreset('default')">&#8634; Reset</button>
+      </div>
+      <div class="quick-row">
+        <span class="quick-label">Presets:</span>
+        <span class="quick-pill" onclick="applyPreset('default')">Default</span>
+        <span class="quick-pill" onclick="applyPreset('low')">ŷ too low (y = 1.2)</span>
+        <span class="quick-pill" onclick="applyPreset('dead')">Dead ReLU (W₂₃ = &minus;0.8)</span>
+        <span class="quick-pill" onclick="applyPreset('biglr')">lr too large (lr = 1.0)</span>
+      </div>
+      <div class="help-text">
+        <strong>Default</strong> is the worked example described above. Then try <strong>ŷ too low</strong> to flip the sign of every gradient, <strong>Dead ReLU</strong>
+        to watch a neuron block the gradient, and <strong>lr too large</strong> to watch one update overshoot.
+      </div>
+      <div class="err-text" id="p1-err"></div>
+    </div>
+
+    <div id="p1-stepcard"></div>
+
+    <div class="card">
+      <div class="card-title">Figure 1 &mdash; The 2-2-1 network (live)</div>
+      <svg id="net-svg" viewBox="0 0 920 450" role="img" aria-label="Network diagram"></svg>
+      <div class="legend">
+        <span><span class="leg-line" style="border-color:#5A7088"></span>positive weight (thicker = larger |W|)</span>
+        <span><span class="leg-line" style="border-color:#C8900A"></span>negative weight</span>
+        <span><span class="leg-line" style="border-color:#8A6AC0;border-top-style:dashed"></span>forward flow</span>
+        <span><span class="leg-line" style="border-color:#C04040;border-top-style:dashed"></span>gradient flowing back</span>
+      </div>
+      <div class="table-wrap"><table class="wt" id="wt-table"></table></div>
+      <div class="fig-caption">Values marked <b>?</b> appear once the matching question has been revealed.</div>
+    </div>
+
+  </div>
+
+  <div class="right">
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-label">Iteration</div><div class="stat-val" id="st-iter">1</div></div>
+      <div class="stat-card"><div class="stat-label">Target y</div><div class="stat-val" id="st-y">&ndash;</div></div>
+      <div class="stat-card"><div class="stat-label">Prediction ŷ</div><div class="stat-val" id="st-yh">?</div></div>
+      <div class="stat-card"><div class="stat-label">Loss</div><div class="stat-val" id="st-loss">?</div></div>
+    </div>
+
+    <div class="insight-card">
+      <div class="insight-lbl" id="p1-insight-lbl">&#9889; Key insight</div>
+      <div class="insight-txt" id="p1-insight"></div>
+    </div>
+
+    <div class="card chart">
+      <div class="card-title">Figure 2 &mdash; Loss after each update</div>
+      <svg id="loss-svg" viewBox="0 0 320 210" role="img" aria-label="Loss history"></svg>
+      <div class="fig-caption">One point per weight update. The loss for the current iteration appears once you reveal it.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Figure 3 &mdash; Gradients ranked by |∂Loss/∂W|</div>
+      <div class="bars" id="grad-bars"></div>
+      <div class="fig-caption"><span style="color:#C04040">&#9632;</span> positive &rarr; weight will <b>decrease</b> &nbsp; <span style="color:#005A82">&#9632;</span> negative &rarr; weight will <b>increase</b></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Side note &mdash; Batch, Mini-Batch or Stochastic GD?</div>
+      <svg viewBox="0 0 310 258" role="img" aria-label="Batch, mini-batch and stochastic gradient descent" id="batch-svg" style="width:100%;height:auto;display:block"></svg>
+      <div class="small-text" style="margin-top:8px">
+        This simulator trains on <b>one</b> sample, so all three variants are the same here.
+        With N samples, backprop runs once per sample <b>exactly as shown</b>, the gradients are
+        <b>averaged over the batch</b>, and only then is the weight update applied. The variants differ
+        only in how many samples go into one update.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Training log</div>
+      <div class="log-inner" id="p1-log"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">What this model simplifies</div>
+      <div class="small-text">
+        One training sample, no bias terms, ReLU hidden neurons, a linear output and squared-error loss.
+        ReLU′(0) is taken as 0, as PyTorch does. Values are computed at full precision and shown to 4
+        decimal places, so multiplying the rounded factors by hand can differ in the last digit.
+        Updated weights are rounded to 4 decimals, as you would do by hand, so every iteration can be
+        checked with a calculator. Biases, when present, get gradients by the same chain rule.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════════════════ PART 2 ═════════════════════════ -->
+<div class="main" id="part-2" hidden>
+  <div class="left">
+
+    <div class="banner" id="p2-banner"></div>
+
+    <div class="card">
+      <div class="card-title">Configure the optimizer &amp; one weight</div>
+      <div class="input-grid">
+        <div class="input-group"><span class="input-prefix">Optimizer</span>
+          <select id="opt-select" onchange="startP2()">
+            <option value="sgd">Plain GD (SGD)</option>
+            <option value="momentum">SGD + Momentum</option>
+            <option value="adagrad">AdaGrad</option>
+            <option value="rmsprop">RMSprop</option>
+            <option value="adam">Adam</option>
+          </select>
+        </div>
+        <div class="input-row-label">The weight, its gradient and the learning rate</div>
+        <div class="input-group"><span class="input-prefix">W</span><input type="number" step="any" id="o-W"></div>
+        <div class="input-group"><span class="input-prefix">∂Loss/∂W</span><input type="number" step="any" id="o-g"></div>
+        <div class="input-group"><span class="input-prefix">lr</span><input type="number" step="any" id="o-lr"></div>
+        <div class="input-group"><span class="input-prefix">ε</span><input type="number" step="any" id="o-eps"></div>
+        <div class="input-row-label">State carried over from earlier steps</div>
+        <div class="input-group" data-opt="momentum"><span class="input-prefix">previous v</span><input type="number" step="any" id="o-vm"></div>
+        <div class="input-group" data-opt="adagrad"><span class="input-prefix">previous acc</span><input type="number" step="any" id="o-acc"></div>
+        <div class="input-group" data-opt="rmsprop"><span class="input-prefix">previous v</span><input type="number" step="any" id="o-vr"></div>
+        <div class="input-group" data-opt="adam"><span class="input-prefix">previous m</span><input type="number" step="any" id="o-m"></div>
+        <div class="input-group" data-opt="adam"><span class="input-prefix">previous v</span><input type="number" step="any" id="o-va"></div>
+        <div class="small-text" data-opt="sgd" style="width:100%">Plain GD keeps no state: every step uses only the current gradient.</div>
+      </div>
+      <div class="controls-row">
+        <button class="btn btn-start" onclick="startP2()">&#9654; Start</button>
+        <button class="btn btn-reset" onclick="presetP2()">&#8634; Reset to defaults</button>
+      </div>
+      <div class="help-text">
+        Work through all five optimizers with the dropdown, keeping the same numbers; each one you
+        finish is added to Figure 4 so you can compare them.
+      </div>
+      <div class="err-text" id="p2-err"></div>
+    </div>
+
+    <div id="p2-stepcard"></div>
+
+    <div class="card">
+      <div class="card-title">Figure 4 &mdash; Where does each optimizer move W?</div>
+      <svg id="line-svg" viewBox="0 0 820 250" role="img" aria-label="Weight update by optimizer" style="width:100%;height:auto;display:block"></svg>
+      <div class="table-wrap"><table class="wt" id="cmp-table"></table></div>
+      <div class="fig-caption">An optimizer appears here once you have revealed its W_new.</div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="card">
+      <div class="card-title">Update rules used in this part</div>
+      <div class="opt-sheet" id="opt-sheet"></div>
+    </div>
+
+    <div class="insight-card">
+      <div class="insight-lbl">&#9889; Key insight</div>
+      <div class="insight-txt">
+        <b>Momentum</b> and <b>Adam</b> remember the <b>direction</b> of past gradients (v, m), so they
+        can keep moving against the current gradient. <b>AdaGrad</b> and <b>RMSprop</b> remember only
+        the <b>size</b> of past gradients (gradient²), so they can make the step bigger or smaller but
+        never reverse it: like plain GD, they always follow the current gradient.
+      </div>
+    </div>
+
+    <div class="card chart">
+      <div class="card-title">Figure 5 &mdash; The five optimizers on the 2-2-1 network</div>
+      <svg id="optnet-svg" viewBox="0 0 320 220" role="img" aria-label="Optimizer comparison on the network"></svg>
+      <div class="opt-legend" id="optnet-legend"></div>
+      <div class="fig-caption" id="optnet-caption"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">What this part simplifies</div>
+      <div class="small-text">
+        The formulas are the moving-average forms shown above: momentum
+        v = 0.9v + 0.1g (PyTorch uses v = 0.9v + g), RMSprop 0.99 / 0.01, Adam 0.9 / 0.999, and ε
+        inside the square root. Real Adam also applies bias correction, m̂ = m/(1 − 0.9ᵗ) and
+        v̂ = v/(1 − 0.999ᵗ); it is skipped here to keep the arithmetic short. PyTorch adds ε outside the root.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═════════════════════════════════════════════════════════════════════════
+// ENGINE START — pure functions, no DOM (tested on their own)
+// ═════════════════════════════════════════════════════════════════════════
+const KEYS = ['13', '23', '14', '24', '35', '45'];
+const SUB  = { 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅' };
+const MINUS = '−';
+const Wn = k => 'W' + SUB[k[0]] + SUB[k[1]];          // '24' -> 'W₂₄'
+
+// Up to `dp` decimals, trailing zeros removed, real minus sign: 0.6770 -> '0.677'
+function fmt(v, dp = 4) {
+  if (!isFinite(v)) return String(v);
+  let s = Math.abs(v).toFixed(dp);
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  if (/^0(\.0*)?$/.test(s)) return '0';
+  return (v < 0 ? MINUS : '') + s;
+}
+const fmtS = (v, dp) => { const s = fmt(v, dp); return (s !== '0' && v > 0) ? '+' + s : s; };
+const par  = (v, dp) => (fmt(v, dp)[0] === MINUS ? `(${fmt(v, dp)})` : fmt(v, dp));
+const pm   = (v, dp) => (fmt(v, dp)[0] === MINUS ? `${MINUS} ${fmt(-v, dp)}` : `+ ${fmt(v, dp)}`);
+// Losses can get tiny during training; show those in scientific notation
+const fmtL = v => (v > 0 && v < 5e-5 ? v.toExponential(1).replace('-', MINUS) : fmt(v));
+function r4(v) { const r = Math.round(v * 1e4) / 1e4; return r === 0 ? 0 : r; }
+
+// Forward pass of the 2-2-1 network (no bias, ReLU hidden, linear output)
+function forward(c, W) {
+  const p13 = c.x1 * W['13'], p23 = c.x2 * W['23'];
+  const p14 = c.x1 * W['14'], p24 = c.x2 * W['24'];
+  const z3 = p13 + p23, z4 = p14 + p24;
+  const r3 = z3 > 0 ? 1 : 0, r4_ = z4 > 0 ? 1 : 0;      // ReLU'(z), with ReLU'(0) = 0
+  const a3 = r3 ? z3 : 0, a4 = r4_ ? z4 : 0;
+  const p35 = a3 * W['35'], p45 = a4 * W['45'];
+  const yh = p35 + p45, err = yh - c.y;
+  return { p13, p23, p14, p24, z3, z4, r3, r4: r4_, a3, a4, p35, p45, yh, err, L: err * err };
+}
+
+// Backward pass: every gradient is a product of local derivatives ("nudge ratios")
+function backward(c, W, f) {
+  const dy = 2 * f.err;                                  // dLoss/dy_hat
+  const fac = {
+    '35': [dy, f.a3],
+    '45': [dy, f.a4],
+    '13': [dy, W['35'], f.r3, c.x1],
+    '23': [dy, W['35'], f.r3, c.x2],
+    '14': [dy, W['45'], f.r4, c.x1],
+    '24': [dy, W['45'], f.r4, c.x2],
+  };
+  const g = {};
+  for (const k of KEYS) g[k] = fac[k].reduce((a, b) => a * b, 1);
+  return { dy, fac, g };
+}
+
+// Plain gradient descent; new weights rounded to 4 dp, as a student would by hand
+function gdStep(W, g, lr) {
+  const n = {};
+  for (const k of KEYS) n[k] = r4(W[k] - lr * g[k]);
+  return n;
+}
+
+function solveIteration(c, W) {
+  const f = forward(c, W);
+  const b = backward(c, W, f);
+  const Wn_ = gdStep(W, b.g, c.lr);
+  const f2 = forward(c, Wn_);
+  return { f, b, Wn: Wn_, f2 };
+}
+
+// One optimizer step on one weight, in the moving-average forms shown on the page
+function optStep(opt, W, g, lr, eps, s) {
+  switch (opt) {
+    case 'sgd':      return { W: W - lr * g, s: {} };
+    case 'momentum': { const v = 0.9 * s.v + 0.1 * g;                 return { W: W - lr * v, s: { v } }; }
+    case 'adagrad':  { const acc = s.acc + g * g;  const d = Math.sqrt(acc + eps); return { W: W - lr * g / d, s: { acc }, d }; }
+    case 'rmsprop':  { const v = 0.99 * s.v + 0.01 * g * g; const d = Math.sqrt(v + eps); return { W: W - lr * g / d, s: { v }, d }; }
+    case 'adam':     { const m = 0.9 * s.m + 0.1 * g; const v = 0.999 * s.v + 0.001 * g * g;
+                       const d = Math.sqrt(v + eps); return { W: W - lr * m / d, s: { m, v }, d }; }
+  }
+}
+
+// Train the whole network with one optimizer; optimizer state starts at 0
+function trainNet(c, W0, opt, lr, eps, n) {
+  const W = { ...W0 }, st = {}, losses = [];
+  for (const k of KEYS) st[k] = { v: 0, acc: 0, m: 0 };
+  for (let i = 0; i < n; i++) {
+    const f = forward(c, W);
+    losses.push(f.L);
+    const { g } = backward(c, W, f);
+    for (const k of KEYS) {
+      const r = optStep(opt, W[k], g[k], lr, eps, st[k]);
+      W[k] = r.W;
+      Object.assign(st[k], r.s);
+    }
+  }
+  losses.push(forward(c, W).L);
+  return losses;
+}
+// ═════════════════════════════════════════════════════════════════════════
+// ENGINE END
+// ═════════════════════════════════════════════════════════════════════════
+
+const OPTS = {
+  sgd:      { name: 'Plain GD (SGD)', short: 'Plain GD', color: '#1A3A56',
+              rule: 'W_new = W − lr × gradient' },
+  momentum: { name: 'SGD + Momentum', short: 'Momentum', color: '#8A6AC0',
+              rule: 'v = 0.9×v + 0.1×gradient\nW_new = W − lr × v' },
+  adagrad:  { name: 'AdaGrad', short: 'AdaGrad', color: '#C8900A',
+              rule: 'acc = acc + gradient²\nW_new = W − lr × gradient / √(acc + ε)' },
+  rmsprop:  { name: 'RMSprop', short: 'RMSprop', color: '#3A9A68',
+              rule: 'v = 0.99×v + 0.01×gradient²\nW_new = W − lr × gradient / √(v + ε)' },
+  adam:     { name: 'Adam', short: 'Adam', color: '#C04040',
+              rule: 'm = 0.9×m + 0.1×gradient\nv = 0.999×v + 0.001×gradient²\nW_new = W − lr × m / √(v + ε)' },
+};
+const PHASE = {
+  fwd:  { label: 'FORWARD PASS',      cls: 'ph-fwd'  },
+  loss: { label: 'LOSS CALCULATION',  cls: 'ph-loss' },
+  bwd:  { label: 'BACKPROPAGATION',   cls: 'ph-bwd'  },
+  upd:  { label: 'WEIGHT UPDATE',     cls: 'ph-upd'  },
+  opt:  { label: 'OPTIMIZER',         cls: 'ph-opt'  },
+};
+const calc = lines => `<pre class="calc">${lines.join('\n')}</pre>`;
+const $ = id => document.getElementById(id);
+
+let currentPart = 1;
+
+// ═════════════════════════════════════════════════════════════════════════
+// Quiz controller — one per part. A step has 1+ "parts"; each Reveal click
+// shows the next part. Next unlocks only after every part has been revealed.
+// ═════════════════════════════════════════════════════════════════════════
+class Quiz {
+  constructor(p, opts) { this.p = p; this.opts = opts; this.steps = []; this.idx = 0; this.shown = []; }
+
+  load(steps, startIdx = 0) {
+    this.steps = steps;
+    this.shown = steps.map((s, i) => (i < startIdx ? s.parts.length : 0));
+    this.idx = startIdx;
+    this.enter();
+  }
+  get step() { return this.steps[this.idx]; }
+  full(i = this.idx) { return this.shown[i] >= this.steps[i].parts.length; }
+  enter() { this.render(); }
+  reveal()    { if (!this.full()) { this.shown[this.idx]++; this.justRevealed = true; this.render(); } }
+  revealAll() { this.shown[this.idx] = this.step.parts.length; this.render(); }
+  next() {
+    if (!this.full()) return;
+    if (this.idx < this.steps.length - 1) { this.idx++; this.enter(); }
+    else if (this.opts.onLast) this.opts.onLast();
+  }
+  prev() { if (this.idx > 0) { this.idx--; this.enter(); } }
+
+  // Keys unlocked by every earlier step, plus this one once fully revealed
+  unlocked() {
+    const u = new Set();
+    this.steps.forEach((s, i) => {
+      if (i < this.idx || (i === this.idx && this.full())) (s.unlock || []).forEach(k => u.add(k));
+    });
+    return u;
+  }
+
+  render() {
+    const s = this.step, p = this.p, n = this.shown[this.idx], total = s.parts.length;
+    const ph = PHASE[s.phase];
+    $(`${p}-badge`).textContent = s.badge || ph.label;
+    $(`${p}-badge`).className = 'step-badge ' + ph.cls;
+    $(`${p}-counter`).textContent = `Question ${this.idx + 1} of ${this.steps.length}`;
+    $(`${p}-title`).innerHTML = s.title;
+    $(`${p}-q`).innerHTML = s.q;
+    $(`${p}-fig`).innerHTML = s.figure ? s.figure(n) : '';
+    const fresh = this.justRevealed ? n - 1 : -1;
+    this.justRevealed = false;
+    $(`${p}-answer`).innerHTML = s.parts.slice(0, n).map((x, i) => `<div class="ans-part${i === fresh ? ' new' : ''}">${x}</div>`).join('');
+
+    const rb = $(`${p}-btn-reveal`);
+    rb.disabled = n >= total;
+    rb.innerHTML = n >= total ? 'Answer revealed'
+      : '&#128161; ' + ((s.labels && s.labels[n]) || (total > 1 ? `Reveal part ${n + 1} of ${total}` : 'Reveal answer'));
+    $(`${p}-btn-all`).style.display = total > 1 && n < total ? '' : 'none';
+
+    $(`${p}-btn-prev`).disabled = this.idx === 0;
+    const nb = $(`${p}-btn-next`);
+    const last = this.idx === this.steps.length - 1;
+    nb.disabled = !this.full() || (last && !this.opts.onLast);
+    nb.innerHTML = last && this.opts.lastLabel ? this.opts.lastLabel() : 'Next &#8594;';
+    $(`${p}-hint`).innerHTML = this.full()
+      ? (last ? (this.opts.lastHint || 'All questions answered.') : 'Click Next for the following question.')
+      : 'Try it yourself first, then reveal. Keys: <span class="kbd">R</span> reveal &nbsp;<span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> move';
+
+    $(`${p}-progress`).innerHTML = this.steps.map((st, i) =>
+      `<div class="prog-step ${st.phase} ${i < this.idx ? 'done' : ''} ${i === this.idx ? 'active' : ''}" title="${PHASE[st.phase].label}"></div>`).join('');
+    this.opts.onRender();
+  }
+}
+
+function stepCardHTML(p, legend) {
+  return `
+  <div class="step-card">
+    <div class="step-header">
+      <span class="step-badge" id="${p}-badge"></span>
+      <span class="step-counter" id="${p}-counter"></span>
+    </div>
+    <div class="step-title" id="${p}-title"></div>
+    <div class="step-q" id="${p}-q"></div>
+    <div class="step-fig" id="${p}-fig"></div>
+    <div class="answer" id="${p}-answer"></div>
+    <div class="reveal-row">
+      <button class="btn btn-reveal" id="${p}-btn-reveal" onclick="Q${p.slice(1)}.reveal()"></button>
+      <button class="btn btn-all" id="${p}-btn-all" onclick="Q${p.slice(1)}.revealAll()">Reveal all</button>
+    </div>
+    <div class="progress-track" id="${p}-progress"></div>
+    ${legend}
+    <div class="nav-row">
+      <button class="btn btn-prev" id="${p}-btn-prev" onclick="Q${p.slice(1)}.prev()">&#8592; Prev</button>
+      <button class="btn btn-next" id="${p}-btn-next" onclick="Q${p.slice(1)}.next()">Next &#8594;</button>
+      <span class="nav-hint" id="${p}-hint"></span>
+    </div>
+  </div>`;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// PART 1 — question builder: one full training iteration
+// ═════════════════════════════════════════════════════════════════════════
+const CALCULUS_BOX = `
+<details class="calculus" open>
+  <summary>The only calculus you need</summary>
+  <ol>
+    <li><b>A derivative is a "nudge ratio".</b> ∂Loss/∂W asks: if I nudge W up a tiny amount, how many
+        times bigger (or smaller) is the change in the Loss? A negative ratio means the Loss moves the opposite way.</li>
+    <li><b>The chain rule = multiply the ratios along the path.</b> If a nudge in W travels through several stops
+        to reach the Loss (W → z → a → ŷ → Loss), the total ratio is the product of the ratio at each stop.</li>
+    <li><b>Three tiny facts:</b> the derivative of <code>c × W</code> with respect to W is <code>c</code>;
+        the derivative of <code>(something)²</code> is <code>2 × (something)</code>;
+        ReLU′(z) is <b>1</b> when z &gt; 0 and <b>0</b> otherwise.</li>
+  </ol>
+</details>`;
+
+const SIDE_NOTE_BATCH = `
+<div class="side-note"><b class="sn">Side note &mdash; how many samples per update?</b><br>
+Here the gradient comes from <b>one</b> training sample. With a dataset of N samples the per-sample gradients
+are <b>averaged</b> before the update: all N samples &rarr; <b>Batch GD</b> (1 update per epoch); a small group
+such as 32 &rarr; <b>Mini-Batch GD</b> (N/32 updates per epoch); one sample &rarr; <b>Stochastic GD</b>
+(N updates per epoch). The backprop for each sample is exactly the calculation you just did.
+See the side-note figure on the right.</div>`;
+
+function factorLabels(k) {
+  if (k[1] === '5') return ['∂Loss/∂ŷ', 'a' + SUB[k[0]]];
+  const h = k[1];
+  return ['∂Loss/∂ŷ', 'W' + SUB[h] + '₅', 'ReLU′(z' + SUB[h] + ')', 'x' + SUB[k[0]]];
+}
+
+function buildP1Steps(c, W, R) {
+  const { f, b, Wn: Wnew, f2 } = R;
+  const steps = [];
+  const dy = b.dy;
+
+  // ── Phase 1: forward pass ────────────────────────────────────────────
+  for (const h of ['3', '4']) {
+    const k1 = '1' + h, k2 = '2' + h, z = f['z' + h], a = f['a' + h], act = f['r' + h];
+    steps.push({
+      phase: 'fwd', unlock: ['h' + h], hl: { edges: [k1, k2], nodes: ['H' + h], dir: 'fwd' },
+      title: `Forward pass &mdash; hidden neuron H${SUB[h]}`,
+      q: `Compute the weighted sum <b>z${SUB[h]}</b> and the activation <b>a${SUB[h]} = ReLU(z${SUB[h]})</b>.
+          <br><span class="formula">z${SUB[h]} = x₁×${Wn(k1)} + x₂×${Wn(k2)}</span>`,
+      parts: [calc([
+        `z${SUB[h]} = x₁×${Wn(k1)} + x₂×${Wn(k2)}`,
+        `   = ${fmt(c.x1)}×${par(W[k1])} + ${fmt(c.x2)}×${par(W[k2])}`,
+        `   = ${fmt(f['p' + k1])} ${pm(f['p' + k2])}`,
+        `   = <b>${fmt(z)}</b>`,
+        `a${SUB[h]} = ReLU(z${SUB[h]}) = max(0, ${fmt(z)}) = <b>${fmt(a)}</b>`,
+      ]) + (act
+        ? `<p>z${SUB[h]} &gt; 0, so ReLU is <b class="ok">ACTIVE</b> and passes z${SUB[h]} through unchanged.</p>`
+        : `<p>z${SUB[h]} ≤ 0, so ReLU is <b class="bad">INACTIVE</b>: a${SUB[h]} = 0. H${SUB[h]} is <b>dead</b> for this sample. It sends nothing forward, and in backpropagation it will block the gradient too.</p>`)],
+    });
+  }
+  steps.push({
+    phase: 'fwd', unlock: ['yh'], hl: { edges: ['35', '45'], nodes: ['O5'], dir: 'fwd' },
+    title: 'Forward pass &mdash; output neuron O₅',
+    q: `Compute the prediction <b>ŷ</b>. The output neuron has <b>no activation</b> (regression), so ŷ is just the weighted sum.
+        <br><span class="formula">ŷ = a₃×W₃₅ + a₄×W₄₅</span>`,
+    parts: [calc([
+      `ŷ = a₃×W₃₅ + a₄×W₄₅`,
+      `  = ${fmt(f.a3)}×${par(W['35'])} + ${fmt(f.a4)}×${par(W['45'])}`,
+      `  = ${fmt(f.p35)} ${pm(f.p45)}`,
+      `  = <b>${fmt(f.yh)}</b>`,
+    ])],
+  });
+
+  // ── Phase 2: loss ────────────────────────────────────────────────────
+  const exact = fmt(f.L, 8) !== fmt(f.L) ? `   <span class="muted">(exact: ${fmt(f.L, 8)})</span>` : '';
+  let verdict;
+  if (f.err > 0) verdict = `The model predicted ${fmt(f.yh)} but the target is ${fmt(c.y)}: the prediction is too <b class="down">HIGH</b>. Weights that push ŷ upward will have to come <b>down</b>.`;
+  else if (f.err < 0) verdict = `The model predicted ${fmt(f.yh)} but the target is ${fmt(c.y)}: the prediction is too <b class="up">LOW</b>. Weights that push ŷ upward will have to go <b>up</b>.`;
+  else verdict = `The prediction is exactly right, so the loss is 0 and every gradient will be 0: there is nothing to learn from this sample.`;
+  steps.push({
+    phase: 'loss', unlock: ['loss'], hl: { edges: [], nodes: ['L'], dir: 'fwd' },
+    title: 'Loss calculation',
+    q: `Compute the loss for this sample. Is the prediction too high or too low?
+        <br><span class="formula">Loss = (ŷ − y)²</span>
+        <br><span class="muted">With one sample there is nothing to average, so this squared error <i>is</i> the MSE.</span>`,
+    parts: [calc([
+      `Loss = (ŷ − y)²`,
+      `     = (${fmt(f.yh)} − ${par(c.y)})²`,
+      `     = (${fmt(f.err)})²`,
+      `     = <b>${fmt(f.L)}</b>${exact}`,
+    ]) + `<p>${verdict}</p>`],
+  });
+
+  // ── Phase 3: backpropagation ─────────────────────────────────────────
+  const dySign = dy > 0 ? 'Positive: raising ŷ would raise the loss, because ŷ is already too high.'
+               : dy < 0 ? 'Negative: raising ŷ would lower the loss, because ŷ is too low.'
+               : 'Zero: the prediction is exact, so nudging ŷ does not change the loss at this point.';
+  steps.push({
+    phase: 'bwd', unlock: ['dy'], hl: { edges: [], nodes: ['O5', 'L'], dir: 'bwd', dyArrow: true },
+    title: 'Backpropagation starts at the loss: ∂Loss/∂ŷ',
+    q: `Backpropagation works from the loss <b>backwards</b>. First compute <b>∂Loss/∂ŷ</b>: if ŷ is nudged
+        up a tiny amount, how much does the loss change?` + CALCULUS_BOX,
+    parts: [calc([
+      `∂Loss/∂ŷ = ∂(ŷ − y)²/∂ŷ`,
+      `         = 2(ŷ − y)`,
+      `         = 2(${fmt(f.yh)} − ${par(c.y)})`,
+      `         = <b>${fmt(dy)}</b>`,
+    ]) + `<p>${dySign}</p><p>This number is the <b>first factor of all six gradients</b>: every path from a weight
+          to the loss passes through ŷ. Backpropagation computes it once and reuses it six times.</p>`],
+  });
+
+  const outStep = k => {
+    const h = k[0], a = f['a' + h];
+    return {
+      phase: 'bwd', unlock: ['g' + k], hl: { edges: [k], nodes: ['O5', 'L'], dir: 'bwd', dyArrow: true },
+      title: `Output-layer gradient ∂Loss/∂${Wn(k)}`,
+      q: `${Wn(k)} connects H${SUB[h]} directly to the output, so only <b>2</b> chain-rule factors are needed.
+          Reveal them one at a time; Figure A fills in from the loss backwards.
+          <br><span class="formula">∂Loss/∂${Wn(k)} = ∂Loss/∂ŷ × ∂ŷ/∂${Wn(k)}</span>`,
+      labels: ['Reveal factor ①  ∂Loss/∂ŷ', `Reveal factor ②  ∂ŷ/∂${Wn(k)}`, 'Reveal the product'],
+      figure: n => chainFig(k, n, c, W, f, b),
+      parts: [
+        `<b>①</b> ∂Loss/∂ŷ = 2(ŷ − y) = <b>${fmt(dy)}</b> <span class="muted">(already computed: reuse it)</span>`,
+        `<b>②</b> ∂ŷ/∂${Wn(k)} = ∂(a₃W₃₅ + a₄W₄₅)/∂${Wn(k)} = a${SUB[h]} = <b>${fmt(a)}</b>
+         <br><span class="muted">The derivative of c×W is c. Here c is the <b>activation feeding the weight</b>, not the weight itself.</span>`,
+        `<div class="result">∂Loss/∂${Wn(k)} = ① × ② = ${par(dy)} × ${par(a)} = ${fmt(b.g[k])}</div>`
+        + (a === 0 ? `<p>a${SUB[h]} = 0 because H${SUB[h]} is dead, so this weight gets <b>no gradient</b>: a dead neuron also blocks learning on the weight <i>leaving</i> it.</p>` : ''),
+      ],
+    };
+  };
+
+  const hidStep = (k, note) => {
+    const i = k[0], h = k[1], wout = h + '5', z = f['z' + h], act = f['r' + h];
+    const other = i === '1' ? '2' : '1';
+    return {
+      phase: 'bwd', unlock: ['g' + k], hl: { edges: [k, wout], nodes: ['H' + h, 'O5', 'L'], dir: 'bwd', dyArrow: true },
+      title: `Hidden-layer gradient ∂Loss/∂${Wn(k)}`,
+      q: `A nudge in ${Wn(k)} changes z${SUB[h]}, which changes a${SUB[h]}, which changes ŷ, which changes the Loss.
+          Four stops, so <b>four</b> nudge ratios to multiply. Reveal them one at a time, from the loss backwards.
+          <br><span class="formula">∂Loss/∂${Wn(k)} = ∂Loss/∂ŷ × ∂ŷ/∂a${SUB[h]} × ∂a${SUB[h]}/∂z${SUB[h]} × ∂z${SUB[h]}/∂${Wn(k)}</span>`,
+      labels: ['Reveal factor ①  ∂Loss/∂ŷ', `Reveal factor ②  ∂ŷ/∂a${SUB[h]}`, `Reveal factor ③  ∂a${SUB[h]}/∂z${SUB[h]}`,
+               `Reveal factor ④  ∂z${SUB[h]}/∂${Wn(k)}`, 'Reveal the product'],
+      figure: n => chainFig(k, n, c, W, f, b),
+      parts: [
+        `<b>①</b> ∂Loss/∂ŷ = 2(ŷ − y) = <b>${fmt(dy)}</b> <span class="muted">(the same for every weight)</span>`,
+        `<b>②</b> ∂ŷ/∂a${SUB[h]} = ∂(a₃W₃₅ + a₄W₄₅)/∂a${SUB[h]} = ${Wn(wout)} = <b>${fmt(W[wout])}</b>`,
+        `<b>③</b> ∂a${SUB[h]}/∂z${SUB[h]} = ReLU′(z${SUB[h]}) = <b>${act}</b>, because z${SUB[h]} = ${fmt(z)} ${act ? '&gt; 0' : '≤ 0'}`
+        + (act ? '' : ` <span class="bad">(H${SUB[h]} is dead: this 0 wipes out the whole product)</span>`),
+        `<b>④</b> ∂z${SUB[h]}/∂${Wn(k)} = ∂(x₁W₁${SUB[h]} + x₂W₂${SUB[h]})/∂${Wn(k)} = x${SUB[i]} = <b>${fmt(c['x' + i])}</b>`,
+        `<div class="result">∂Loss/∂${Wn(k)} = ① × ② × ③ × ④ = ${b.fac[k].map(v => par(v)).join(' × ')} = ${fmt(b.g[k])}</div>`
+        + (note ? `<p>${note}</p>` : ''),
+      ],
+    };
+  };
+
+  steps.push(outStep('35'));
+  steps.push(outStep('45'));
+  steps.push(hidStep('24', 'Notice the pattern: the first factor is the shared ∂Loss/∂ŷ, the middle two come from the path through H₄, and the last is the input feeding the weight.'));
+  steps.push(hidStep('14', 'Factors ①, ② and ③ are exactly the same as for W₂₄, because both weights feed H₄. Only ④ changed: x₁ instead of x₂.'));
+  steps.push(hidStep('13', 'This path goes through H₃, so ② is now W₃₅ and ③ is ReLU′(z₃).'));
+  steps.push(hidStep('23', 'Factors ①, ② and ③ are the same as for W₁₃; only ④ changed. Backpropagation reuses these shared factors instead of recomputing them.'));
+
+  // ── Sign and magnitude ───────────────────────────────────────────────
+  const pos = KEYS.filter(k => fmt(b.g[k]) !== '0' && b.g[k] > 0);
+  const neg = KEYS.filter(k => fmt(b.g[k]) !== '0' && b.g[k] < 0);
+  const zer = KEYS.filter(k => fmt(b.g[k]) === '0');
+  const list = ks => ks.map(Wn).join(', ');
+  let signPart = `<p>A <b>positive</b> nudge ratio means "raise this weight and the loss goes UP". We want the loss to go DOWN,
+    so gradient descent moves each weight <b>opposite</b> to its gradient: <code>W_new = W − lr × ∂Loss/∂W</code>.
+    The minus sign <i>is</i> the "go opposite" part.</p><ul style="margin:8px 0 0 22px">`;
+  if (pos.length) signPart += `<li><b class="down">Positive</b> (${pos.length}): ${list(pos)} &rarr; these weights will <b>DECREASE</b></li>`;
+  if (neg.length) signPart += `<li><b class="up">Negative</b> (${neg.length}): ${list(neg)} &rarr; these weights will <b>INCREASE</b></li>`;
+  if (zer.length) signPart += `<li><b>Zero</b> (${zer.length}): ${list(zer)} &rarr; these weights will <b>not change</b> on this step</li>`;
+  signPart += '</ul>';
+  if (pos.length === 6 && f.err > 0) signPart += `<p>All six are positive, which fits the loss step: ŷ is too high, and here every weight pushes ŷ up.</p>`;
+  if (neg.length === 6 && f.err < 0) signPart += `<p>All six are negative, which fits the loss step: ŷ is too low, and here every weight pushes ŷ up, so all of them must grow.</p>`;
+
+  const ranked = KEYS.slice().sort((p, q) => Math.abs(b.g[q]) - Math.abs(b.g[p]));
+  const top = ranked[0], bot = ranked[5];
+  const facStr = k => {
+    const L = factorLabels(k);
+    return b.fac[k].map((v, j) => (j === 0 ? par(v) : `${L[j].replace(/\(z.\)/, '')}(${fmt(v)})`)).join(' × ') + ` = ${fmt(b.g[k])}`;
+  };
+  let whyBot;
+  const zeroIdx = b.fac[bot].findIndex(v => v === 0);
+  if (zeroIdx >= 0) whyBot = `One factor, ${factorLabels(bot)[zeroIdx]}, is exactly 0, so the whole product is 0.`;
+  else {
+    const smalls = b.fac[bot].map((v, j) => ({ v: Math.abs(v), j })).filter(o => o.v < 1).sort((p, q) => p.v - q.v).slice(0, 2);
+    whyBot = smalls.length
+      ? 'Its smallest factors, ' + smalls.map(o => `${factorLabels(bot)[o.j]} = ${fmt(b.fac[bot][o.j])}`).join(' and ') + ', dilute the signal.'
+      : 'It has the smallest product of the six.';
+  }
+  const rankRows = ranked.map((k, j) => `${j + 1}. ${Wn(k).padEnd(4)} |∂Loss/∂W| = ${fmt(Math.abs(b.g[k]))}${j === 0 ? '   ← STRONGEST' : j === 5 ? '   ← weakest' : ''}`);
+  let rankPart = calc(rankRows) + `
+    <p><b>A gradient is a PRODUCT of nudge ratios.</b> A product is big when every factor is big, and small when ANY factor is small.</p>
+    <p><b>Why ${Wn(top)} is strongest:</b> ${facStr(top)}.</p>
+    <p><b>Why ${Wn(bot)} is weakest:</b> ${facStr(bot)}. ${whyBot}</p>
+    <p><b>General principle.</b> An output-layer weight's gradient scales with the activation feeding it (∂Loss/∂ŷ × a).
+    A hidden-layer weight's gradient scales with its input x, the strength of its path to the output, and whether its neuron
+    is alive (ReLU′). Each extra layer adds another factor to the product; when those factors are mostly below 1 the product
+    shrinks toward 0 for the early layers. That is the seed of the <b>vanishing-gradient problem</b>.</p>`;
+  if (Math.abs(b.g[top]) === 0) {
+    const why = f.err === 0 ? 'the prediction is already exact, so ∂Loss/∂ŷ = 0'
+              : 'both hidden neurons are dead (a₃ = a₄ = 0), so every path to the loss contains a factor of 0';
+    rankPart = `<p>All six gradients are <b>0</b> because ${why}. No weight is more influential than another,
+      and gradient descent will not change any weight on this step.</p>`;
+  }
+  steps.push({
+    phase: 'bwd', unlock: ['rank'], hl: { edges: [], nodes: [], dir: 'bwd' },
+    title: 'Reading the gradients: sign and magnitude',
+    q: `All six gradients are now in the table under Figure 1.<ol>
+          <li>What does the <b>sign</b> of each gradient tell the optimizer to do?</li>
+          <li>Rank the weights by <b>influence</b> (|∂Loss/∂W|). Which is strongest, which is weakest, and <i>why</i>?</li></ol>`,
+    labels: ['Reveal the sign analysis', 'Reveal the ranking'],
+    parts: [signPart, rankPart],
+  });
+
+  // ── Phase 4: weight update ───────────────────────────────────────────
+  const updRows = KEYS.map(k => {
+    const d = Wnew[k] > W[k] ? '↑ up' : Wnew[k] < W[k] ? '↓ down' : '= same';
+    return `${Wn(k)}:  ${fmt(W[k])} − ${fmt(c.lr)}×${par(b.g[k])} = ${fmt(Wnew[k])}`.padEnd(40) + d;
+  });
+  steps.push({
+    phase: 'upd', unlock: ['wnew'], hl: { edges: KEYS, nodes: [], dir: 'upd' },
+    title: 'Weight update with gradient descent',
+    q: `Update all six weights with learning rate <b>lr = ${fmt(c.lr)}</b>.
+        <br><span class="formula">W_new = W − lr × ∂Loss/∂W</span>` + SIDE_NOTE_BATCH,
+    parts: [calc(updRows) + `<p>Each weight moves <b>opposite</b> to its gradient by lr × |gradient|.
+      New weights are rounded to 4 decimals, as you would do by hand.</p>`],
+  });
+
+  const better = f2.L < f.L;
+  const flipped = Math.sign(f2.err) !== Math.sign(f.err) && f2.err !== 0 && f.err !== 0;
+  let after;
+  if (better) after = `<p class="ok">The loss fell from ${fmt(f.L)} to ${fmt(f2.L)} after ONE update: ŷ moved from ${fmt(f.yh)} toward the target ${fmt(c.y)}.</p>`;
+  else if (f2.L === f.L) after = `<p>The loss did not change (${fmt(f.L)}).</p>`;
+  else after = `<p class="bad">The loss ROSE from ${fmt(f.L)} to ${fmt(f2.L)}.` + (flipped
+    ? ` ŷ jumped from ${fmt(f.yh)} past the target ${fmt(c.y)} to ${fmt(f2.yh)}: the step <b>overshot</b>. The learning rate is too large.</p>`
+    : ` The step was too large for this point of the loss surface; try a smaller learning rate.</p>`);
+  steps.push({
+    phase: 'upd', unlock: ['after'], hl: { edges: KEYS, nodes: ['H3', 'H4', 'O5', 'L'], dir: 'fwd' },
+    title: 'Sanity check: forward pass with the new weights',
+    q: `Run the forward pass again with the <b>new</b> weights. Did the loss go down?`,
+    parts: [calc([
+      `z₃ = ${fmt(c.x1)}×${par(Wnew['13'])} + ${fmt(c.x2)}×${par(Wnew['23'])} = ${fmt(f2.z3)}`.padEnd(46) + `a₃ = ${fmt(f2.a3)}`,
+      `z₄ = ${fmt(c.x1)}×${par(Wnew['14'])} + ${fmt(c.x2)}×${par(Wnew['24'])} = ${fmt(f2.z4)}`.padEnd(46) + `a₄ = ${fmt(f2.a4)}`,
+      `ŷ  = ${fmt(f2.a3)}×${par(Wnew['35'])} + ${fmt(f2.a4)}×${par(Wnew['45'])} = ${fmt(f2.p35)} ${pm(f2.p45)} = <b>${fmt(f2.yh)}</b>`,
+      `Loss = (${fmt(f2.yh)} − ${par(c.y)})² = <b>${fmt(f2.L)}</b>    <span class="muted">(was ${fmt(f.L)})</span>`,
+    ]) + after + `<p>That completes one training iteration: forward pass, loss, backpropagation, weight update.
+      Real training repeats these four steps thousands of times.</p>`],
+  });
+  return steps;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Figure A — the chain-rule path for one weight (inside the question card)
+// ═════════════════════════════════════════════════════════════════════════
+function chainFig(k, shown, c, W, f, b) {
+  const out = k[1] === '5';
+  const h = out ? k[0] : k[1], i = k[0];
+  const circ = ['', '①', '②', '③', '④'];
+  let nodes, arrows;
+  if (out) {
+    nodes = [Wn(k), 'ŷ', 'Loss'];
+    arrows = [
+      { n: 2, top: `∂ŷ/∂${Wn(k)}`, bot: `a${SUB[h]} = ${fmt(f['a' + h])}` },
+      { n: 1, top: '∂Loss/∂ŷ', bot: `2(ŷ−y) = ${fmt(b.dy)}` },
+    ];
+  } else {
+    nodes = [Wn(k), 'z' + SUB[h], 'a' + SUB[h], 'ŷ', 'Loss'];
+    arrows = [
+      { n: 4, top: `∂z${SUB[h]}/∂${Wn(k)}`, bot: `x${SUB[i]} = ${fmt(c['x' + i])}` },
+      { n: 3, top: `∂a${SUB[h]}/∂z${SUB[h]}`, bot: `ReLU′ = ${f['r' + h]}` },
+      { n: 2, top: `∂ŷ/∂a${SUB[h]}`, bot: `W${SUB[h]}₅ = ${fmt(W[h + '5'])}` },
+      { n: 1, top: '∂Loss/∂ŷ', bot: `2(ŷ−y) = ${fmt(b.dy)}` },
+    ];
+  }
+  const nf = arrows.length, m = nodes.length, bw = 96, bh = 46, y0 = 84;
+  const gap = (860 - m * bw) / (m - 1);
+  const xs = nodes.map((_, j) => 20 + j * (bw + gap));
+  let s = `<svg viewBox="0 0 900 200" role="img" aria-label="Chain rule path for ${Wn(k)}">
+    <defs><marker id="ca" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8AA0B8"/></marker>
+    <marker id="cr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#C04040"/></marker></defs>
+    <text x="20" y="14" font-size="14" font-weight="800" fill="#6A8098">FIGURE A &mdash; CHAIN-RULE PATH FOR ${Wn(k)}</text>
+    <line x1="${xs[m - 1] + bw / 2}" y1="38" x2="${xs[0] + bw / 2}" y2="38" stroke="#C04040" stroke-width="2.5" marker-end="url(#cr)" class="flow"/>
+    <text x="450" y="43" text-anchor="middle" font-size="13" font-weight="800" fill="#7A0A0A" paint-order="stroke" stroke="#FFF" stroke-width="6">gradient flows backward: from the Loss to ${Wn(k)}</text>`;
+  nodes.forEach((nm, j) => {
+    const fill = j === 0 ? '#F8DCDC' : j === m - 1 ? '#FFF0C0' : '#EDF1F7';
+    const bd = j === 0 ? '#C04040' : j === m - 1 ? '#C8900A' : '#8AA0B8';
+    s += `<rect x="${xs[j]}" y="${y0}" width="${bw}" height="${bh}" rx="10" fill="${fill}" stroke="${bd}" stroke-width="2"/>
+      <text x="${xs[j] + bw / 2}" y="${y0 + 30}" text-anchor="middle" font-size="20" font-weight="800" fill="#1E2E3E">${nm}</text>`;
+  });
+  arrows.forEach((a, j) => {
+    const x1 = xs[j] + bw, x2 = xs[j + 1], mx = (x1 + x2) / 2, rev = shown >= a.n;
+    const col = rev ? '#7A0A0A' : '#6A8098';
+    s += `<line x1="${x1 + 4}" y1="${y0 + bh / 2}" x2="${x2 - 4}" y2="${y0 + bh / 2}" stroke="${rev ? '#C04040' : '#8AA0B8'}" stroke-width="${rev ? 3 : 2}" marker-end="url(#${rev ? 'cr' : 'ca'})"/>
+      <text x="${mx}" y="${y0 - 8}" text-anchor="middle" font-size="14" font-weight="800" fill="${col}">${circ[a.n]} ${a.top}</text>
+      <text x="${mx}" y="${y0 + bh + 22}" text-anchor="middle" font-size="14" font-weight="800" fill="${col}">${rev ? a.bot : '= ?'}</text>`;
+  });
+  const vals = b.fac[k].map((v, j) => (shown > j ? par(v) : '?'));
+  const prod = shown > nf ? fmt(b.g[k]) : '?';
+  s += `<text x="450" y="194" text-anchor="middle" font-size="16" font-weight="800" fill="#1E2E3E">∂Loss/∂${Wn(k)} = ${circ.slice(1, nf + 1).join(' × ')} = ${vals.join(' × ')} = ${prod}</text></svg>`;
+  return s;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Figure 1 — the live network
+// ═════════════════════════════════════════════════════════════════════════
+const NODE = {
+  x1: { x: 20,  y: 85,  w: 150, h: 70 },  x2: { x: 20,  y: 305, w: 150, h: 70 },
+  H3: { x: 400, y: 62,  w: 170, h: 116 }, H4: { x: 400, y: 282, w: 170, h: 116 },
+  O5: { x: 720, y: 110, w: 170, h: 104 }, L:  { x: 720, y: 320, w: 170, h: 110 },
+};
+const EDGE = {   // [x1, y1, x2, y2, label position t along the edge]
+  '13': [170, 110, 400, 110, 0.5],  '23': [170, 330, 400, 140, 0.3],
+  '14': [170, 130, 400, 310, 0.3],  '24': [170, 350, 400, 350, 0.5],
+  '35': [570, 120, 720, 150, 0.5],  '45': [570, 340, 720, 180, 0.5],
+};
+
+function netSVG(c, W, R, U, hl) {
+  const { f, b, Wn: Wnew, f2 } = R;
+  const PH = { fwd: '#8A6AC0', bwd: '#C04040', upd: '#3A9A68' };
+  const hc = PH[hl.dir] || '#8A6AC0';
+  let s = `<defs>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8AA0B8"/></marker>
+    <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8A6AC0"/></marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#C04040"/></marker>
+    <marker id="au" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3A9A68"/></marker></defs>
+    <text x="95" y="30" text-anchor="middle" font-size="15" font-weight="800" fill="#4A1E7A">INPUT LAYER</text>
+    <text x="485" y="30" text-anchor="middle" font-size="15" font-weight="800" fill="#005A82">HIDDEN LAYER (ReLU)</text>
+    <text x="805" y="30" text-anchor="middle" font-size="15" font-weight="800" fill="#3A5068">OUTPUT &amp; LOSS</text>`;
+
+  // edges
+  for (const k of KEYS) {
+    const [x1, y1, x2, y2] = EDGE[k], w = W[k];
+    const sw = 1.5 + 3.5 * Math.min(Math.abs(w), 1.5) / 1.5;
+    s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${w < 0 ? '#C8900A' : '#5A7088'}" stroke-width="${sw}" marker-end="url(#ag)" opacity="0.85"/>`;
+    if (hl.edges.includes(k)) {
+      const m = hl.dir === 'bwd' ? 'ab' : hl.dir === 'upd' ? 'au' : 'af';
+      s += hl.dir === 'bwd'
+        ? `<line x1="${x2}" y1="${y2}" x2="${x1}" y2="${y1}" stroke="${hc}" stroke-width="4" class="flow" marker-end="url(#${m})"/>`
+        : `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${hc}" stroke-width="4" class="flow" marker-end="url(#${m})"/>`;
+    }
+  }
+  // O5 -> Loss, and the gradient arrow back up
+  s += `<line x1="775" y1="214" x2="775" y2="318" stroke="#8AA0B8" stroke-width="3" marker-end="url(#ag)"/>
+        <text x="765" y="272" text-anchor="end" font-size="14" font-weight="700" fill="#3A5068">ŷ</text>`;
+  if (U.has('dy') || hl.dyArrow) {
+    const lit = hl.dyArrow;
+    s += `<line x1="840" y1="318" x2="840" y2="216" stroke="#C04040" stroke-width="${lit ? 4 : 2.5}" ${lit ? 'class="flow"' : ''} marker-end="url(#ab)"/>
+          <text x="850" y="262" font-size="14" font-weight="800" fill="#7A0A0A">∂L/∂ŷ</text>
+          <text x="850" y="280" font-size="14" font-weight="800" fill="#7A0A0A">${U.has('dy') ? '= ' + fmt(b.dy) : '= ?'}</text>`;
+  }
+  // edge labels (on top of the lines, with a white halo)
+  for (const k of KEYS) {
+    const [x1, y1, x2, y2, t] = EDGE[k];
+    const lx = x1 + (x2 - x1) * t, ly = y1 + (y2 - y1) * t;
+    const wtxt = U.has('wnew') ? `${Wn(k)}: ${fmt(W[k])} → ${fmt(Wnew[k])}` : `${Wn(k)} = ${fmt(W[k])}`;
+    s += `<text x="${lx}" y="${ly - 4}" text-anchor="middle" font-size="15" font-weight="800" fill="${U.has('wnew') ? '#0F4A28' : '#1E2E3E'}" paint-order="stroke" stroke="#FFF" stroke-width="6">${wtxt}</text>`;
+    if (U.has('g' + k))
+      s += `<text x="${lx}" y="${ly + 15}" text-anchor="middle" font-size="14" font-weight="800" fill="#7A0A0A" paint-order="stroke" stroke="#FFF" stroke-width="6">∂L/∂W = ${fmtS(b.g[k])}</text>`;
+  }
+  // nodes
+  const box = (id, fill, bd, lines) => {
+    const n = NODE[id], lit = hl.nodes.includes(id);
+    let t = `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="14" fill="${fill}" stroke="${lit ? hc : bd}" stroke-width="${lit ? 4.5 : 2}"/>`;
+    const step = n.h / (lines.length + 1);
+    lines.forEach((ln, j) => {
+      t += `<text x="${n.x + n.w / 2}" y="${n.y + step * (j + 1) + 6}" text-anchor="middle" font-size="${ln.fs || 17}" font-weight="${ln.fw || 800}" fill="${ln.col || '#1E2E3E'}">${ln.t}</text>`;
+    });
+    return t;
+  };
+  s += box('x1', '#E8DDF6', '#8A6AC0', [{ t: `x₁ = ${fmt(c.x1)}`, fs: 21 }, { t: 'input', fs: 14, fw: 600, col: '#4A1E7A' }]);
+  s += box('x2', '#E8DDF6', '#8A6AC0', [{ t: `x₂ = ${fmt(c.x2)}`, fs: 21 }, { t: 'input', fs: 14, fw: 600, col: '#4A1E7A' }]);
+  for (const h of ['3', '4']) {
+    const known = U.has('h' + h), dead = known && !f['r' + h];
+    s += box('H' + h, dead ? '#EEEEEE' : '#DDEEF8', dead ? '#999' : '#5AAAD0', [
+      { t: `H${SUB[h]} · ReLU`, fs: 17 },
+      { t: `z${SUB[h]} = ${known ? fmt(f['z' + h]) : '?'}`, fs: 17, fw: 700 },
+      { t: `a${SUB[h]} = ${known ? fmt(f['a' + h]) : '?'}`, fs: 17, fw: 700 },
+      known ? { t: dead ? 'dead (z ≤ 0)' : 'active (z > 0)', fs: 13, col: dead ? '#7A0A0A' : '#0F4A28' } : { t: ' ', fs: 13 },
+    ]);
+  }
+  const o5 = [{ t: 'O₅ · no activation', fs: 15 }, { t: `ŷ = ${U.has('yh') ? fmt(f.yh) : '?'}`, fs: 21 }];
+  if (U.has('after')) o5.push({ t: `after update: ${fmt(f2.yh)}`, fs: 13, col: '#0F4A28' });
+  s += box('O5', '#E4E8EE', '#6A8098', o5);
+  const lb = [{ t: 'Loss = (ŷ − y)²', fs: 15 }, { t: `y = ${fmt(c.y)}`, fs: 14, fw: 700, col: '#6A3A00' },
+              { t: `Loss = ${U.has('loss') ? fmt(f.L) : '?'}`, fs: 19 }];
+  if (U.has('after')) lb.push({ t: `after update: ${fmt(f2.L)}`, fs: 13, col: f2.L < f.L ? '#0F4A28' : '#7A0A0A' });
+  s += box('L', '#FFF0C0', '#C8900A', lb);
+  return s;
+}
+
+function weightTable(c, W, R, U) {
+  const { b, Wn: Wnew } = R;
+  const conn = { '13': 'x₁ → H₃', '23': 'x₂ → H₃', '14': 'x₁ → H₄', '24': 'x₂ → H₄', '35': 'H₃ → O₅', '45': 'H₄ → O₅' };
+  let s = '<tr><th>Weight</th><th>Connects</th><th>Value</th><th>∂Loss/∂W</th><th>New value</th></tr>';
+  for (const k of KEYS) {
+    const g = U.has('g' + k), n = U.has('wnew');
+    s += `<tr><td>${Wn(k)}</td><td style="font-family:inherit">${conn[k]}</td><td>${fmt(W[k])}</td>
+      <td class="${g ? '' : 'q'}" style="${g ? 'color:#7A0A0A' : ''}">${g ? fmtS(b.g[k]) : '?'}</td>
+      <td class="${n ? '' : 'q'}" style="${n ? 'color:#0F4A28' : ''}">${n ? fmt(Wnew[k]) : '?'}</td></tr>`;
+  }
+  return s;
+}
+
+// Figure 2 — loss history
+function lossChart(pts) {
+  const W_ = 320, H_ = 210, L = 46, Rm = 12, T = 14, B = 40;
+  const vals = pts.filter(p => p.v != null);
+  let s = `<line x1="${L}" y1="${T}" x2="${L}" y2="${H_ - B}" stroke="#8AA0B8"/><line x1="${L}" y1="${H_ - B}" x2="${W_ - Rm}" y2="${H_ - B}" stroke="#8AA0B8"/>
+    <text x="${(L + W_ - Rm) / 2}" y="${H_ - 6}" text-anchor="middle" font-size="12" font-weight="700" fill="#3A5068">Weight updates so far</text>
+    <text x="12" y="${(T + H_ - B) / 2}" text-anchor="middle" font-size="12" font-weight="700" fill="#3A5068" transform="rotate(-90 12 ${(T + H_ - B) / 2})">Loss</text>`;
+  if (!vals.length) return s + `<text x="${(L + W_) / 2}" y="${H_ / 2}" text-anchor="middle" font-size="13" fill="#6A8098">reveal the loss to start the curve</text>`;
+  const maxV = Math.max(...vals.map(p => p.v)) || 1, n = Math.max(pts.length - 1, 1);
+  const X = i => L + (W_ - Rm - L) * i / n, Y = v => (H_ - B) - (H_ - B - T) * v / maxV;
+  s += `<text x="${L - 4}" y="${T + 4}" text-anchor="end" font-size="11" fill="#3A5068">${fmt(maxV)}</text>
+        <text x="${L - 4}" y="${H_ - B + 4}" text-anchor="end" font-size="11" fill="#3A5068">0</text>
+        <text x="${L}" y="${H_ - B + 14}" text-anchor="middle" font-size="11" fill="#3A5068">0</text>
+        <text x="${W_ - Rm}" y="${H_ - B + 14}" text-anchor="middle" font-size="11" fill="#3A5068">${n}</text>`;
+  const known = pts.map((p, i) => ({ ...p, i })).filter(p => p.v != null);
+  if (known.length > 1) s += `<polyline fill="none" stroke="#005A82" stroke-width="2.5" points="${known.map(p => `${X(p.i)},${Y(p.v)}`).join(' ')}"/>`;
+  known.forEach(p => { s += `<circle cx="${X(p.i)}" cy="${Y(p.v)}" r="${pts.length > 30 ? 2 : 4}" fill="${p.after ? '#3A9A68' : '#005A82'}"/>`; });
+  const lastP = known[known.length - 1];
+  s += `<text x="${Math.min(X(lastP.i) + 8, W_ - 56)}" y="${Math.max(Y(lastP.v) - 8, T + 18)}" font-size="12" font-weight="800" fill="#1E2E3E">${fmtL(lastP.v)}</text>`;
+  return s;
+}
+
+// Side-note figure: how many samples per update
+function batchSVG() {
+  const rows = [
+    { t: 'Batch GD', sub: 'gradient averaged over all 12 samples', g: 12, u: '1 update' },
+    { t: 'Mini-Batch GD', sub: 'gradient averaged over each batch of 4', g: 4, u: '3 updates' },
+    { t: 'Stochastic GD', sub: 'gradient from one sample at a time', g: 1, u: '12 updates' },
+  ];
+  let s = `<text x="155" y="14" text-anchor="middle" font-size="12" font-weight="800" fill="#6A8098">ONE EPOCH OVER N = 12 SAMPLES</text>`;
+  rows.forEach((r, j) => {
+    const y = 38 + j * 70;
+    s += `<text x="4" y="${y + 4}" font-size="14" font-weight="800" fill="#1E2E3E">${r.t}</text>
+          <text x="306" y="${y + 4}" text-anchor="end" font-size="13" font-weight="800" fill="#0F4A28">${r.u} / epoch</text>`;
+    for (let i = 0; i < 12; i++) s += `<rect x="${4 + i * 21}" y="${y + 12}" width="17" height="17" rx="3" fill="#CCE8F8" stroke="#5AAAD0"/>`;
+    for (let g0 = 0; g0 < 12; g0 += r.g) {
+      const x1 = 4 + g0 * 21, x2 = 4 + (g0 + r.g) * 21 - 4;
+      s += `<path d="M${x1},${y + 33} L${x1},${y + 38} L${x2},${y + 38} L${x2},${y + 33}" fill="none" stroke="#3A9A68" stroke-width="2"/>`;
+    }
+    s += `<text x="4" y="${y + 52}" font-size="11" font-weight="700" fill="#3A5068">${r.sub}</text>`;
+  });
+  s += `<text x="155" y="250" text-anchor="middle" font-size="11" font-weight="700" fill="#0F4A28">green bracket = one averaged gradient = one update</text>`;
+  return s;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// PART 1 — state and controls
+// ═════════════════════════════════════════════════════════════════════════
+const P1_PRESETS = {
+  default: { x1: 0.35, x2: 0.9, y: 0.5, lr: 0.1, W: { '13': 0.1, '23': 0.8, '14': 0.4, '24': 0.6, '35': 0.3, '45': 0.9 } },
+  low:   { x1: 0.35, x2: 0.9, y: 1.2, lr: 0.1, W: { '13': 0.1, '23': 0.8, '14': 0.4, '24': 0.6, '35': 0.3, '45': 0.9 } },
+  dead:  { x1: 0.35, x2: 0.9, y: 0.5, lr: 0.1, W: { '13': 0.1, '23': -0.8, '14': 0.4, '24': 0.6, '35': 0.3, '45': 0.9 } },
+  biglr: { x1: 0.35, x2: 0.9, y: 0.5, lr: 1.0, W: { '13': 0.1, '23': 0.8, '14': 0.4, '24': 0.6, '35': 0.3, '45': 0.9 } },
+};
+const P1_NAMES = { default: 'Default', low: 'ŷ too low', dead: 'Dead ReLU', biglr: 'lr too large' };
+let P1 = null;
+let Q1, Q2;
+
+function applyPreset(name, startIdx = 0) {
+  const p = P1_PRESETS[name];
+  $('in-x1').value = p.x1; $('in-x2').value = p.x2; $('in-y').value = p.y; $('in-lr').value = p.lr;
+  for (const k of KEYS) $('in-' + k).value = p.W[k];
+  startP1(P1_NAMES[name], startIdx);
+}
+
+function readP1() {
+  const num = id => parseFloat($(id).value);
+  const c = { x1: num('in-x1'), x2: num('in-x2'), y: num('in-y'), lr: num('in-lr') };
+  const W = {};
+  for (const k of KEYS) W[k] = num('in-' + k);
+  const bad = [...Object.values(c), ...Object.values(W)].some(v => !isFinite(v));
+  if (bad) return { err: 'Every box needs a number.' };
+  if (c.lr <= 0) return { err: 'The learning rate must be greater than 0.' };
+  return { c, W };
+}
+
+function startP1(label, startIdx = 0) {
+  const r = readP1();
+  $('p1-err').textContent = r.err || '';
+  if (r.err) return;
+  P1 = { c: r.c, W: r.W, iter: 1, hist: [], log: [], done: P1 ? P1.done : false };
+  P1.log.unshift({ msg: `Start${typeof label === 'string' ? ' · ' + label : ''}: lr = ${fmt(r.c.lr)}, y = ${fmt(r.c.y)}` });
+  loadIteration(startIdx);
+}
+
+function loadIteration(startIdx = 0) {
+  P1.R = solveIteration(P1.c, P1.W);
+  Q1.load(buildP1Steps(P1.c, P1.W, P1.R), startIdx);
+}
+
+function finishIteration() {
+  const R = P1.R;
+  P1.hist.push(R.f.L);
+  P1.log.unshift({ msg: `Iteration ${P1.iter}: Loss ${fmtL(R.f.L)} → ${fmtL(R.f2.L)}`, cls: R.f2.L < R.f.L ? 'good' : 'bad' });
+  P1.W = R.Wn; P1.iter++; P1.done = true;
+  loadIteration();
+}
+
+function trainP1(n) {
+  if (!P1) startP1();
+  if (!P1) return;
+  for (let i = 0; i < n; i++) {
+    const R = solveIteration(P1.c, P1.W);
+    P1.hist.push(R.f.L);
+    P1.log.unshift({ msg: `Iteration ${P1.iter}: Loss ${fmtL(R.f.L)} → ${fmtL(R.f2.L)}`, cls: R.f2.L < R.f.L ? 'good' : 'bad' });
+    P1.W = R.Wn; P1.iter++;
+  }
+  P1.done = true;
+  loadIteration();
+}
+
+const INSIGHT = {
+  fwd:  `<b>z</b> is the weighted sum <i>before</i> the activation; <b>a</b> is the value <i>after</i> it.
+         Keep them separate: in the backward pass the ReLU slope (1 or 0) is decided by the sign of <b>z</b>.`,
+  loss: `The loss is one number that says how wrong the prediction is. It is HIGH when ŷ is far from y,
+         and zero when the prediction is exact.`,
+  bwd:  `A gradient is a <b>product of nudge ratios</b> along the path from the weight to the loss.
+         ∂Loss/∂ŷ is the first factor of every gradient, and weights that share a neuron share two more factors.
+         Computing shared factors once and reusing them is what makes backpropagation efficient.`,
+  upd:  `<code>W_new = W − lr × ∂Loss/∂W</code>. The <b>minus sign</b> is the "go opposite to the gradient" part;
+         the <b>learning rate</b> sets the step size. Too small: slow. Too large: the step overshoots
+         (try the <i>lr too large</i> preset).`,
+};
+
+function renderP1() {
+  const U = Q1.unlocked(), R = P1.R, hl = Q1.step.hl || { edges: [], nodes: [] };
+  $('net-svg').innerHTML = netSVG(P1.c, P1.W, R, U, hl);
+  $('wt-table').innerHTML = weightTable(P1.c, P1.W, R, U);
+  $('st-iter').textContent = P1.iter;
+  $('st-y').textContent = fmt(P1.c.y);
+  $('st-yh').textContent = U.has('yh') ? fmt(R.f.yh) : '?';
+  $('st-loss').textContent = U.has('loss') ? fmtL(R.f.L) : '?';
+  const ph = Q1.step.phase;
+  $('p1-insight-lbl').innerHTML = '&#9889; Key insight &mdash; ' + PHASE[ph].label.toLowerCase();
+  $('p1-insight').innerHTML = INSIGHT[ph];
+
+  const pts = P1.hist.map(v => ({ v }));
+  pts.push({ v: U.has('loss') ? R.f.L : null });
+  if (U.has('after')) pts.push({ v: R.f2.L, after: true });
+  $('loss-svg').innerHTML = lossChart(pts);
+
+  const known = KEYS.filter(k => U.has('g' + k)).sort((p, q) => Math.abs(R.b.g[q]) - Math.abs(R.b.g[p]));
+  const mx = Math.max(...KEYS.map(k => Math.abs(R.b.g[k])), 1e-12);
+  $('grad-bars').innerHTML = known.length ? known.map(k => {
+    const g = R.b.g[k];
+    return `<div class="bar-row"><span class="bw">${Wn(k)}</span><div class="bar-track"><div class="bar-fill" style="width:${100 * Math.abs(g) / mx}%;background:${g > 0 ? '#C04040' : '#005A82'}"></div></div><span class="bar-val">${fmtS(g)}</span></div>`;
+  }).join('') : '<div class="small-text">Gradients appear here as you reveal them in the backpropagation questions.</div>';
+
+  $('p1-log').innerHTML = P1.log.map(l => `<div class="log-entry ${l.cls || ''}">${l.msg}</div>`).join('');
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// PART 2 — optimizers: one update of a single weight
+// ═════════════════════════════════════════════════════════════════════════
+const P2_DEFAULT = { W: 0.5, g: -0.4, lr: 0.1, eps: 0.01, vm: 0.2, acc: 0.5, vr: 0.3, m: 0.1, va: 0.2 };
+let P2 = null;
+
+function presetP2() {
+  const d = P2_DEFAULT;
+  $('o-W').value = d.W; $('o-g').value = d.g; $('o-lr').value = d.lr; $('o-eps').value = d.eps;
+  $('o-vm').value = d.vm; $('o-acc').value = d.acc; $('o-vr').value = d.vr; $('o-m').value = d.m; $('o-va').value = d.va;
+  P2 = null;
+  startP2();
+}
+
+function readP2() {
+  const ids = ['W', 'g', 'lr', 'eps', 'vm', 'acc', 'vr', 'm', 'va'];
+  const o = { opt: $('opt-select').value };
+  for (const k of ids) o[k] = parseFloat($('o-' + k).value);
+  if (ids.some(k => !isFinite(o[k]))) return { err: 'Every box needs a number.' };
+  if (o.lr <= 0) return { err: 'The learning rate must be greater than 0.' };
+  if (o.eps <= 0) return { err: 'ε must be greater than 0.' };
+  if (o.acc < 0 || o.vr < 0 || o.va < 0) return { err: 'acc and v hold squared gradients, so they cannot be negative.' };
+  return { o };
+}
+
+function optResult(o, opt) {
+  const st = { momentum: { v: o.vm }, adagrad: { acc: o.acc }, rmsprop: { v: o.vr }, adam: { m: o.m, v: o.va }, sgd: {} }[opt];
+  return optStep(opt, o.W, o.g, o.lr, o.eps, st);
+}
+
+function buildP2Steps(o) {
+  const { opt, W, g, lr, eps } = o;
+  const r = optResult(o, opt), Wnew = r.W, sgdW = W - lr * g;
+  const dir = x => (x > W ? '<b class="up">UP</b>' : x < W ? '<b class="down">DOWN</b>' : '<b>nowhere</b>');
+  const wLine = (term) => [`      = ${fmt(W)} ${pm(-term)}`, `      = <b>${fmt(Wnew)}</b>`];
+  const S = (title, q, part, unlock) => ({ phase: 'opt', badge: OPTS[opt].name.toUpperCase(), title, q, parts: [part], unlock: unlock || [] });
+  const steps = [];
+  const gStr = par(g);
+
+  if (opt === 'sgd') {
+    steps.push(S('Plain gradient descent: compute W_new',
+      `Plain GD uses only the current gradient.<br><span class="formula">W_new = W − lr × gradient</span><br>
+       Compute W_new for W = ${fmt(W)}, gradient = ${fmt(g)}, lr = ${fmt(lr)}.`,
+      calc([`W_new = W − lr × gradient`, `      = ${fmt(W)} − ${fmt(lr)} × ${gStr}`, ...wLine(lr * g)]), ['w_sgd']));
+    steps.push(S('Which way did W move, and why?',
+      `Did W go up or down? Explain using the sign of the gradient.`,
+      `<p>W moved ${dir(Wnew)} (${fmt(W)} → ${fmt(Wnew)}). The gradient is ${g < 0 ? '<b>negative</b>: raising W would <b>lower</b> the loss, so gradient descent raises W' : g > 0 ? '<b>positive</b>: raising W would <b>raise</b> the loss, so gradient descent lowers W' : 'zero, so W does not move'}.</p>
+       <p>Plain GD has <b>no memory</b>: the step is always exactly lr × the current gradient.</p>`));
+  }
+
+  if (opt === 'momentum') {
+    const v = r.s.v, pt = 0.9 * o.vm + g, ptW = W - lr * pt;
+    steps.push(S('Momentum: update the velocity',
+      `Momentum keeps a running <b>velocity</b> v of past gradients. Previous v = ${fmt(o.vm)}.
+       <br><span class="formula">v = 0.9 × v + 0.1 × gradient</span><br>Compute the new v.`,
+      calc([`v_new = 0.9 × v_old + 0.1 × gradient`, `      = 0.9 × ${par(o.vm)} + 0.1 × ${gStr}`,
+            `      = ${fmt(0.9 * o.vm)} ${pm(0.1 * g)}`, `      = <b>${fmt(v)}</b>`])));
+    steps.push(S('Momentum: compute W_new',
+      `Now move the weight using the <b>velocity</b>, not the raw gradient.<br><span class="formula">W_new = W − lr × v</span>`,
+      calc([`W_new = W − lr × v_new`, `      = ${fmt(W)} − ${fmt(lr)} × ${par(v)}`, ...wLine(lr * v)]), ['w_momentum']));
+    const differ = Math.sign(Wnew - W) !== Math.sign(sgdW - W);
+    steps.push(S('Momentum vs plain GD',
+      `Plain GD would give W_new = ${fmt(sgdW)}. Compare it with momentum's ${fmt(Wnew)}: did they move the same way? Why?`,
+      (differ
+        ? `<p>Plain GD moves W ${dir(sgdW)}, but momentum moves it ${dir(Wnew)}. The previous velocity (${fmtS(o.vm)}) pointed the
+           other way. Even after decaying to ${fmt(0.9 * o.vm)} it outweighs the new contribution 0.1 × ${gStr} = ${fmt(0.1 * g)},
+           so the weight keeps moving in its <b>old</b> direction. Momentum turns around only after enough opposite gradients accumulate.</p>`
+        : `<p>Both move W ${dir(Wnew)}. Here the velocity and the current gradient agree on the direction, so momentum
+           follows the gradient; the step size is lr × v = ${fmt(lr * v)} instead of lr × gradient = ${fmt(lr * g)}.</p>`)
+      + `<p class="muted">PyTorch's form v = 0.9×v + gradient does not scale the new gradient by 0.1:
+         v = ${fmt(0.9 * o.vm)} ${pm(g)} = ${fmt(pt)}, W_new = ${fmt(W)} − ${fmt(lr)} × ${par(pt)} = ${fmt(ptW)}.</p>`));
+  }
+
+  if (opt === 'adagrad') {
+    const acc = r.s.acc, d = r.d, eff = lr / d, num = lr * g;
+    steps.push(S('AdaGrad: accumulate the squared gradient',
+      `AdaGrad adds up every squared gradient it has ever seen. Previous acc = ${fmt(o.acc)}.
+       <br><span class="formula">acc = acc + gradient²</span><br>Compute the new acc.`,
+      calc([`acc_new = acc_old + gradient²`, `        = ${fmt(o.acc)} + ${gStr}²`, `        = ${fmt(o.acc)} + ${fmt(g * g, 6)}`, `        = <b>${fmt(acc, 6)}</b>`])));
+    steps.push(S('AdaGrad: compute W_new',
+      `Divide the step by √(acc + ε), with ε = ${fmt(eps)}.<br><span class="formula">W_new = W − lr × gradient / √(acc + ε)</span>`,
+      calc([`W_new = W − lr × gradient / √(acc_new + ε)`, `      = ${fmt(W)} − ${fmt(lr)} × ${gStr} / √(${fmt(acc, 6)} + ${fmt(eps)})`,
+            `      = ${fmt(W)} − ${par(num)} / √${fmt(acc + eps, 6)}`, `      = ${fmt(W)} − ${par(num)} / ${fmt(d)}`, ...wLine(num / d)])
+      + `<p>Effective learning rate = lr / √(acc + ε) = ${fmt(lr)} / ${fmt(d)} = <b>${fmt(eff)}</b>.</p>`, ['w_adagrad']));
+    steps.push(S('AdaGrad: what happens to the effective learning rate?',
+      `Is the effective learning rate (${fmt(eff)}) bigger or smaller than lr = ${fmt(lr)}? What happens to it over many steps?`,
+      `<p>${d < 1 ? `It is <b>larger</b> than lr this time, because √(acc + ε) = ${fmt(d)} is less than 1.`
+                  : `It is <b>smaller</b> than lr, because √(acc + ε) = ${fmt(d)} is greater than 1.`}</p>
+       <p>acc only ever grows (it adds gradient² at every step), so the effective lr <b>shrinks at every step</b>.
+       Once √(acc + ε) passes 1 it falls below the base lr and keeps heading towards 0: AdaGrad eventually <b>stops learning</b>.
+       RMSprop was designed to fix exactly this.</p>`));
+  }
+
+  if (opt === 'rmsprop') {
+    const v = r.s.v, d = r.d, eff = lr / d, num = lr * g;
+    steps.push(S('RMSprop: update the moving average of gradient²',
+      `RMSprop keeps a <b>moving average</b> of squared gradients instead of a growing sum. Previous v = ${fmt(o.vr)}.
+       <br><span class="formula">v = 0.99 × v + 0.01 × gradient²</span><br>Compute the new v.`,
+      calc([`v_new = 0.99 × v_old + 0.01 × gradient²`, `      = 0.99 × ${fmt(o.vr)} + 0.01 × ${gStr}²`,
+            `      = ${fmt(0.99 * o.vr, 6)} + ${fmt(0.01 * g * g, 6)}`, `      = <b>${fmt(v, 6)}</b>`])));
+    steps.push(S('RMSprop: compute W_new',
+      `Divide the step by √(v + ε), with ε = ${fmt(eps)}.<br><span class="formula">W_new = W − lr × gradient / √(v + ε)</span>`,
+      calc([`W_new = W − lr × gradient / √(v_new + ε)`, `      = ${fmt(W)} − ${fmt(lr)} × ${gStr} / √(${fmt(v, 6)} + ${fmt(eps)})`,
+            `      = ${fmt(W)} − ${par(num)} / √${fmt(v + eps, 6)}`, `      = ${fmt(W)} − ${par(num)} / ${fmt(d)}`, ...wLine(num / d)])
+      + `<p>Effective learning rate = ${fmt(lr)} / ${fmt(d)} = <b>${fmt(eff)}</b>.</p>`, ['w_rmsprop']));
+    steps.push(S('RMSprop vs AdaGrad',
+      `v moved from ${fmt(o.vr)} to ${fmt(v, 6)}. Why does this keep the learning rate stable, unlike AdaGrad?`,
+      `<p>v changes slowly because of the 0.99 decay, and it can go <b>down</b> as well as up: old gradients are gradually
+       forgotten. AdaGrad's acc can only grow, so its effective learning rate decays towards 0; RMSprop's does not.</p>`));
+  }
+
+  if (opt === 'adam') {
+    const m = r.s.m, v = r.s.v, d = r.d, num = lr * m;
+    steps.push(S('Adam: update m (direction memory)',
+      `Adam keeps two memories. <b>m</b> is a moving average of the gradient (like momentum). Previous m = ${fmt(o.m)}.
+       <br><span class="formula">m = 0.9 × m + 0.1 × gradient</span><br>Compute the new m.`,
+      calc([`m_new = 0.9 × m_old + 0.1 × gradient`, `      = 0.9 × ${par(o.m)} + 0.1 × ${gStr}`,
+            `      = ${fmt(0.9 * o.m)} ${pm(0.1 * g)}`, `      = <b>${fmt(m, 6)}</b>`])));
+    steps.push(S('Adam: update v (size memory)',
+      `<b>v</b> is a moving average of the squared gradient (like RMSprop). Previous v = ${fmt(o.va)}.
+       <br><span class="formula">v = 0.999 × v + 0.001 × gradient²</span><br>Compute the new v.`,
+      calc([`v_new = 0.999 × v_old + 0.001 × gradient²`, `      = 0.999 × ${fmt(o.va)} + 0.001 × ${gStr}²`,
+            `      = ${fmt(0.999 * o.va, 6)} + ${fmt(0.001 * g * g, 6)}`, `      = <b>${fmt(v, 6)}</b>`])));
+    steps.push(S('Adam: compute W_new',
+      `Step along m, scaled by √(v + ε), with ε = ${fmt(eps)}.<br><span class="formula">W_new = W − lr × m / √(v + ε)</span>`,
+      calc([`W_new = W − lr × m_new / √(v_new + ε)`, `      = ${fmt(W)} − ${fmt(lr)} × ${par(m, 6)} / √(${fmt(v, 6)} + ${fmt(eps)})`,
+            `      = ${fmt(W)} − ${par(num, 6)} / √${fmt(v + eps, 6)}`, `      = ${fmt(W)} − ${par(num, 6)} / ${fmt(d)}`, ...wLine(num / d)]), ['w_adam']));
+    const against = Math.sign(m) !== Math.sign(g) && m !== 0 && g !== 0;
+    steps.push(S('Reading the Adam step',
+      `Which way did W move, and how does that compare with plain GD (${fmt(sgdW)})?`,
+      `<p>W moved ${dir(Wnew)} (${fmt(W)} → ${fmt(Wnew)}). ` + (against
+        ? `m is still ${m > 0 ? 'POSITIVE' : 'NEGATIVE'} (${fmt(m, 6)}) although the current gradient is ${g < 0 ? 'negative' : 'positive'},
+           so, like momentum, Adam keeps moving against the current gradient. Plain GD moves W ${dir(sgdW)}.</p>`
+        : `m has the same sign as the current gradient, so Adam moves the same way as plain GD (${dir(sgdW)}).</p>`)
+      + `<p>v barely changes (${fmt(o.va)} → ${fmt(v, 6)}): a very stable estimate of the gradient's size.</p>
+         <p class="muted">Real Adam also applies bias correction, m̂ = m / (1 − 0.9ᵗ) and v̂ = v / (1 − 0.999ᵗ), which matters most
+         in the first few steps. It is skipped here to keep the arithmetic short.</p>`));
+  }
+  return steps;
+}
+
+function startP2(startIdx = 0) {
+  const r = readP2();
+  $('p2-err').textContent = r.err || '';
+  if (r.err) return;
+  const o = r.o;
+  const sig = JSON.stringify({ ...o, opt: '' });
+  if (!P2 || P2.sig !== sig) P2 = { sig, done: new Set() };
+  P2.o = o;
+  document.querySelectorAll('[data-opt]').forEach(el => { el.style.display = el.dataset.opt === o.opt ? '' : 'none'; });
+  Q2.load(buildP2Steps(o), startIdx);
+}
+
+function lineSVG(o, done) {
+  const order = ['sgd', 'momentum', 'adagrad', 'rmsprop', 'adam'];
+  const res = {};
+  order.forEach(k => { res[k] = optResult(o, k).W; });
+  const all = [o.W, ...order.map(k => res[k])];
+  let lo = Math.min(...all), hi = Math.max(...all);
+  const pad = (hi - lo) * 0.15 || 0.05; lo -= pad; hi += pad;
+  const L = 150, R = 800, X = v => L + (R - L) * (v - lo) / (hi - lo), axisY = 222;
+  let s = `<defs>${order.map(k => `<marker id="m-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${OPTS[k].color}"/></marker>`).join('')}</defs>
+    <line x1="${L}" y1="${axisY}" x2="${R}" y2="${axisY}" stroke="#3A5068" stroke-width="2"/>
+    <line x1="${X(o.W)}" y1="14" x2="${X(o.W)}" y2="${axisY}" stroke="#1E2E3E" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="${X(o.W)}" y="${axisY + 20}" text-anchor="middle" font-size="14" font-weight="800" fill="#1E2E3E">W_old = ${fmt(o.W)}</text>
+    <text x="${L}" y="${axisY + 20}" text-anchor="start" font-size="12" fill="#6A8098">${fmt(lo, 3)}</text>
+    <text x="${R}" y="${axisY + 20}" text-anchor="end" font-size="12" fill="#6A8098">${fmt(hi, 3)}</text>`;
+  order.forEach((k, j) => {
+    const y = 30 + j * 38, isDone = done.has(k);
+    s += `<text x="8" y="${y + 5}" font-size="15" font-weight="800" fill="${OPTS[k].color}">${OPTS[k].short}</text>`;
+    if (isDone) {
+      const x2 = X(res[k]);
+      s += `<line x1="${X(o.W)}" y1="${y}" x2="${x2}" y2="${y}" stroke="${OPTS[k].color}" stroke-width="4" marker-end="url(#m-${k})"/>
+            <circle cx="${x2}" cy="${y}" r="5" fill="${OPTS[k].color}"/>
+            <text x="${x2 + (x2 >= X(o.W) ? 10 : -10)}" y="${y + 5}" text-anchor="${x2 >= X(o.W) ? 'start' : 'end'}" font-size="14" font-weight="800" fill="#1E2E3E">${fmt(res[k])}</text>`;
+    } else {
+      s += `<text x="${X(o.W) + 10}" y="${y + 5}" font-size="14" font-weight="700" fill="#8AA0B8">? &mdash; not revealed yet</text>`;
+    }
+  });
+  return { svg: s, res };
+}
+
+function renderP2() {
+  const o = P2.o, U = Q2.unlocked();
+  if (U.has('w_' + o.opt)) P2.done.add(o.opt);
+  const { svg, res } = lineSVG(o, P2.done);
+  $('line-svg').innerHTML = svg;
+  let t = '<tr><th>Optimizer</th><th>W_new</th><th>Step (W_new − W)</th><th>Direction</th></tr>';
+  for (const k of ['sgd', 'momentum', 'adagrad', 'rmsprop', 'adam']) {
+    const d = P2.done.has(k), st = res[k] - o.W;
+    t += `<tr><td style="font-family:inherit;color:${OPTS[k].color}">${OPTS[k].name}</td>
+      <td class="${d ? '' : 'q'}">${d ? fmt(res[k]) : '?'}</td><td class="${d ? '' : 'q'}">${d ? fmtS(st) : '?'}</td>
+      <td class="${d ? '' : 'q'}" style="font-family:inherit">${d ? (st > 0 ? '↑ UP' : st < 0 ? '↓ DOWN' : '= same') : '?'}</td></tr>`;
+  }
+  $('cmp-table').innerHTML = t;
+  $('opt-sheet').innerHTML = Object.entries(OPTS).map(([k, v]) =>
+    `<div class="opt-rule ${k === o.opt ? 'sel' : ''}"><b style="color:${v.color}">${v.name}</b><code>${v.rule}</code></div>`).join('');
+  $('p2-banner').className = 'banner' + (P1 && P1.done ? '' : ' warn');
+  $('p2-banner').innerHTML = `<p><b>Part 2 builds on Part 1.</b> An optimizer changes <b>only step 4</b>, the weight update.
+    The forward pass, the loss and backpropagation stay exactly as in Part 1: the optimizer receives the gradient
+    ∂Loss/∂W and decides how far to move W.</p>
+    <p><b>The problem:</b> a weight currently has value <b>W</b>, and backpropagation gave its gradient <b>∂Loss/∂W</b>.
+    Compute one update of this weight with the chosen optimizer and learning rate <b>lr</b>. Some optimizers carry a
+    <b>state</b> from earlier steps (a velocity v, a running sum acc, or moving averages m and v); the values in the
+    "State carried over" boxes are that state. ε is a tiny constant that prevents division by zero.</p>`
+    + (P1 && P1.done ? '' : `<p><b>Finish one full iteration of Part 1 first.</b></p>`);
+  renderOptNet(o);
+}
+
+function renderOptNet(o) {
+  const p = P1_PRESETS.default, c = { x1: p.x1, x2: p.x2, y: p.y };
+  const N = 30, order = ['sgd', 'momentum', 'adagrad', 'rmsprop', 'adam'];
+  const runs = {};
+  order.forEach(k => { runs[k] = trainNet(c, p.W, k, o.lr, o.eps, N); });
+  const W_ = 320, H_ = 220, L = 46, Rm = 10, T = 12, B = 40;
+  const maxV = Math.max(...order.flatMap(k => runs[k]).filter(isFinite)) || 1;
+  const X = i => L + (W_ - Rm - L) * i / N, Y = v => (H_ - B) - (H_ - B - T) * Math.min(v, maxV) / maxV;
+  let s = `<line x1="${L}" y1="${T}" x2="${L}" y2="${H_ - B}" stroke="#8AA0B8"/><line x1="${L}" y1="${H_ - B}" x2="${W_ - Rm}" y2="${H_ - B}" stroke="#8AA0B8"/>
+    <text x="${(L + W_ - Rm) / 2}" y="${H_ - 6}" text-anchor="middle" font-size="12" font-weight="700" fill="#3A5068">Weight updates</text>
+    <text x="12" y="${(T + H_ - B) / 2}" text-anchor="middle" font-size="12" font-weight="700" fill="#3A5068" transform="rotate(-90 12 ${(T + H_ - B) / 2})">Loss</text>
+    <text x="${L - 4}" y="${T + 4}" text-anchor="end" font-size="11" fill="#3A5068">${fmt(maxV)}</text>
+    <text x="${L - 4}" y="${H_ - B + 4}" text-anchor="end" font-size="11" fill="#3A5068">0</text>
+    <text x="${L}" y="${H_ - B + 14}" text-anchor="middle" font-size="11" fill="#3A5068">0</text>
+    <text x="${W_ - Rm}" y="${H_ - B + 14}" text-anchor="middle" font-size="11" fill="#3A5068">${N}</text>`;
+  order.forEach(k => {
+    s += `<polyline fill="none" stroke="${OPTS[k].color}" stroke-width="${k === o.opt ? 4 : 2}" opacity="${k === o.opt ? 1 : 0.75}" points="${runs[k].map((v, i) => `${X(i)},${Y(v)}`).join(' ')}"/>`;
+  });
+  $('optnet-svg').innerHTML = s;
+  $('optnet-legend').innerHTML = order.map(k =>
+    `<span style="color:${OPTS[k].color}"><i style="background:${OPTS[k].color}"></i>${OPTS[k].name}: final loss ${fmtL(runs[k][N])}</span>`).join('');
+  $('optnet-caption').innerHTML = `The default network and sample from Part 1, ${N} updates, lr = ${fmt(o.lr)}, ε = ${fmt(o.eps)}, optimizer
+    state starting at 0. Only the update rule differs. This is one short run on one sample, not a general ranking of optimizers.`;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Page wiring
+// ═════════════════════════════════════════════════════════════════════════
+function showPart(n) {
+  currentPart = n;
+  $('part-1').hidden = n !== 1; $('part-2').hidden = n !== 2;
+  $('tab-1').classList.toggle('active', n === 1); $('tab-2').classList.toggle('active', n === 2);
+  if (n === 2) renderP2();
+}
+
+document.addEventListener('keydown', e => {
+  if ((e.target.closest && e.target.closest('input, select, textarea')) || e.metaKey || e.ctrlKey || e.altKey) return;
+  const q = currentPart === 1 ? Q1 : Q2;
+  if (e.key === 'r' || e.key === 'R') q.reveal();
+  else if (e.key === 'ArrowRight') q.next();
+  else if (e.key === 'ArrowLeft') q.prev();
+});
+
+const PHASE_LEGEND = `<div class="phase-legend">
+  <span><i style="background:var(--fwd-bd)"></i>Forward pass</span><span><i style="background:var(--loss-bd)"></i>Loss</span>
+  <span><i style="background:var(--bwd-bd)"></i>Backpropagation</span><span><i style="background:var(--upd-bd)"></i>Weight update</span></div>`;
+$('p1-stepcard').innerHTML = stepCardHTML('p1', PHASE_LEGEND);
+$('p2-stepcard').innerHTML = stepCardHTML('p2', '');
+$('batch-svg').innerHTML = batchSVG();
+
+Q1 = new Quiz('p1', {
+  onRender: renderP1,
+  lastLabel: () => `Start iteration ${P1.iter + 1} &#8594;`,
+  lastHint: 'Iteration complete. Start the next one with the updated weights.',
+  onLast: finishIteration,
+});
+Q2 = new Quiz('p2', {
+  onRender: renderP2,
+  lastHint: 'Pick another optimizer from the dropdown to compare.',
+});
+
+// Deep links, e.g. ?preset=dead&step=8  or  ?part=2&opt=adam&step=3
+(function init() {
+  const qs = new URLSearchParams(location.search);
+  const step = Math.max(0, (parseInt(qs.get('step'), 10) || 1) - 1);
+  const preset = P1_PRESETS[qs.get('preset')] ? qs.get('preset') : 'default';
+  const part2 = qs.get('part') === '2';
+  applyPreset(preset, part2 ? 0 : Math.min(step, 13));
+  if (OPTS[qs.get('opt')]) $('opt-select').value = qs.get('opt');
+  presetP2();
+  if (part2) { Q2.load(Q2.steps, Math.min(step, Q2.steps.length - 1)); showPart(2); }
+})();
+</script>
+</body>
+</html>
